@@ -1,0 +1,2641 @@
+﻿
+
+---------------------------------
+### FILE: AuditCategoryCard.tsx
+---------------------------------
+
+
+import React, { useState, useCallback, useRef } from 'react';
+import { PhotoIcon, PlusCircleIcon, FolderOpenIcon, XCircleIcon, CameraIcon } from './icons';
+
+type AuditCategoryName = 'Info Point Birouri' | 'Intrare' | 'Best Seller' | 'Rafturi';
+
+interface AuditCategoryCardProps {
+    category: AuditCategoryName;
+    description: string;
+    icon: React.FC<{ className?: string }>;
+    onRunAudit: (category: AuditCategoryName, mainImage: File, mainImageUrl: string, refImages: File[]) => void;
+}
+
+const CameraModal: React.FC<{
+    onClose: () => void;
+    onCapture: (blob: Blob | null) => void;
+}> = ({ onClose, onCapture }) => {
+    const videoRef = useRef<HTMLVideoElement>(null);
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const streamRef = useRef<MediaStream | null>(null);
+    const [isCameraReady, setIsCameraReady] = useState(false);
+
+    React.useEffect(() => {
+        const openCamera = async () => {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                streamRef.current = stream;
+                if (videoRef.current) {
+                    videoRef.current.srcObject = stream;
+                    videoRef.current.onloadedmetadata = () => {
+                        setIsCameraReady(true);
+                    };
+                }
+            } catch (err) {
+                console.error("Error accessing camera:", err);
+                alert("Nu am putut accesa camera. AsigurÄ-te cÄ ai acordat permisiuni Ă®n browser.");
+                onClose();
+            }
+        };
+
+        openCamera();
+
+        return () => {
+            if (streamRef.current) {
+                streamRef.current.getTracks().forEach(track => track.stop());
+            }
+        };
+    }, [onClose]);
+
+    const handleCapture = () => {
+        if (videoRef.current && canvasRef.current) {
+            const video = videoRef.current;
+            const canvas = canvasRef.current;
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const context = canvas.getContext('2d');
+            context?.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
+            canvas.toBlob(blob => {
+                onCapture(blob);
+                onClose();
+            }, 'image/jpeg');
+        }
+    };
+    
+    return (
+        <div className="fixed inset-0 bg-black/90 z-50 flex flex-col items-center justify-center p-4 backdrop-blur-sm">
+            {!isCameraReady && (
+                <div className="text-white text-lg">Pornire camerÄ...</div>
+            )}
+            <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                className={`w-full h-auto max-w-4xl max-h-[calc(100vh-150px)] rounded-lg shadow-2xl shadow-cyan-500/10 transition-opacity duration-300 ${isCameraReady ? 'opacity-100' : 'opacity-0'}`}
+            ></video>
+            <canvas ref={canvasRef} className="hidden"></canvas>
+            <div className="mt-6 flex items-center justify-center w-full max-w-4xl">
+                <div className="flex-1 text-left">
+                    <button
+                        onClick={onClose}
+                        className="px-6 py-3 rounded-lg text-sm font-bold bg-white/10 hover:bg-white/20 text-white transition-colors"
+                    >
+                        AnuleazÄ
+                    </button>
+                </div>
+                <div className="flex-1 flex justify-center">
+                    <button
+                        onClick={handleCapture}
+                        disabled={!isCameraReady}
+                        className="w-20 h-20 rounded-full bg-white flex items-center justify-center ring-4 ring-offset-4 ring-offset-black ring-white/50 hover:scale-105 transition-transform disabled:opacity-50 disabled:scale-100"
+                        aria-label="Capture photo"
+                    >
+                        <div className="w-16 h-16 rounded-full bg-white border-4 border-black"></div>
+                    </button>
+                </div>
+                <div className="flex-1"></div>
+            </div>
+        </div>
+    );
+};
+
+
+const AuditCategoryCard: React.FC<AuditCategoryCardProps> = ({ category, description, icon: Icon, onRunAudit }) => {
+    const [mainImageFile, setMainImageFile] = useState<File | null>(null);
+    const [mainImageUrl, setMainImageUrl] = useState<string | null>(null);
+    const [refImageFiles, setRefImageFiles] = useState<File[]>([]);
+    const [refImageUrls, setRefImageUrls] = useState<string[]>([]);
+    const [isLoading, setIsLoading] = useState(false);
+    
+    const [isCameraOpen, setIsCameraOpen] = useState(false);
+    const [isCapturingForRef, setIsCapturingForRef] = useState(false);
+
+    const handleMainFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (file) {
+            setMainImageFile(file);
+            setMainImageUrl(URL.createObjectURL(file));
+        }
+    };
+
+    const handleRefFilesChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const files = event.target.files;
+        if (files) {
+            // Explicitly cast Array.from result to File[] to ensure TypeScript infers the correct type
+            const newImageFiles = Array.from(files) as File[];
+            const newImageUrls = newImageFiles.map(file => URL.createObjectURL(file));
+
+            if (newImageFiles.length > 0) {
+                setRefImageFiles(prev => [...prev, ...newImageFiles]);
+                setRefImageUrls(prev => [...prev, ...newImageUrls]);
+            }
+        }
+    };
+    
+    const handlePhotoCapture = (blob: Blob | null) => {
+        if (blob instanceof Blob) {
+            const fileName = `capture-${Date.now()}.jpg`;
+            const file = new File([blob], fileName, { type: 'image/jpeg' });
+            const url = URL.createObjectURL(file);
+
+            if (isCapturingForRef) {
+                setRefImageFiles(prev => [...prev, file]);
+                setRefImageUrls(prev => [...prev, url]);
+            } else {
+                setMainImageFile(file);
+                setMainImageUrl(url);
+            }
+        }
+    };
+
+    const removeRefImage = (indexToRemove: number) => {
+        setRefImageFiles(prev => prev.filter((_, index) => index !== indexToRemove));
+        setRefImageUrls(prev => {
+            const urlToRemove = prev[indexToRemove];
+            URL.revokeObjectURL(urlToRemove);
+            return prev.filter((_, index) => index !== indexToRemove);
+        });
+    };
+
+    const handleAuditClick = () => {
+        if (mainImageFile && mainImageUrl) {
+            setIsLoading(true);
+            onRunAudit(category, mainImageFile, mainImageUrl, refImageFiles);
+        }
+    };
+
+    const uniqueId = `file-upload-${category}`;
+    const uniqueRefId = `ref-file-upload-${category}`;
+
+    return (
+        <>
+        {isCameraOpen && <CameraModal onClose={() => setIsCameraOpen(false)} onCapture={handlePhotoCapture} />}
+        <div className="glass-panel p-4 rounded-xl flex flex-col space-y-4">
+            <header className="flex items-start gap-3">
+                <div className="w-10 h-10 bg-gradient-to-br from-cyan-500/20 to-teal-500/20 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <Icon className="w-6 h-6 text-cyan-300" />
+                </div>
+                <div>
+                    <h3 className="text-lg font-bold text-white">{category}</h3>
+                    <p className="text-sm text-[var(--text-secondary)]">{description}</p>
+                </div>
+            </header>
+
+            <div className="flex-grow min-h-0">
+                {mainImageUrl ? (
+                    <div className="relative w-full h-48 rounded-lg overflow-hidden group">
+                        <img src={mainImageUrl} alt="Preview audit" className="w-full h-full object-cover" />
+                        <label htmlFor={uniqueId} className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
+                            <span className="text-white font-semibold">SchimbÄ Imaginea</span>
+                        </label>
+                        <input id={uniqueId} name={uniqueId} type="file" className="sr-only" accept="image/png, image/jpeg, image/webp" onChange={handleMainFileChange} />
+                    </div>
+                ) : (
+                    <div className="w-full h-48 flex flex-col items-center justify-center border-2 border-dashed border-[var(--border-subtle)] rounded-lg hover:bg-white/5 transition-colors p-4">
+                        <PhotoIcon className="w-10 h-10 text-[var(--text-secondary)]" />
+                        <label htmlFor={uniqueId} className="mt-2 text-sm text-[var(--text-primary)] cursor-pointer">
+                            <span className="font-semibold hover:text-cyan-400">ĂŽncarcÄ imaginea</span>
+                        </label>
+                        <p className="text-xs text-[var(--text-secondary)]">principalÄ pentru audit</p>
+                        <input id={uniqueId} type="file" className="sr-only" accept="image/png, image/jpeg, image/webp" onChange={handleMainFileChange} />
+                        
+                        <div className="relative w-full flex items-center justify-center my-2">
+                            <div className="flex-grow border-t border-[var(--border-subtle)]"></div>
+                            <span className="flex-shrink mx-2 text-xs text-[var(--text-secondary)]">SAU</span>
+                            <div className="flex-grow border-t border-[var(--border-subtle)]"></div>
+                        </div>
+                        
+                        <button onClick={() => { setIsCapturingForRef(false); setIsCameraOpen(true); }} className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-md bg-white/5 hover:bg-white/10 text-[var(--text-secondary)] hover:text-white transition-colors">
+                            <CameraIcon className="w-5 h-5" />
+                            FÄ o pozÄ
+                        </button>
+                    </div>
+                )}
+            </div>
+
+            <div className="flex-shrink-0">
+                <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-semibold text-[var(--text-secondary)] flex items-center gap-2">
+                        <FolderOpenIcon className="w-5 h-5" />
+                        Imagini ReferinČ›Ä ({refImageFiles.length})
+                    </h4>
+                     <div className="flex items-center gap-2">
+                        <label htmlFor={uniqueRefId} className="flex items-center gap-1 text-sm text-cyan-400 hover:text-cyan-300 cursor-pointer transition-colors">
+                            <PlusCircleIcon className="w-5 h-5" /> AdaugÄ
+                        </label>
+                        <input id={uniqueRefId} name={uniqueRefId} type="file" multiple className="sr-only" accept="image/png, image/jpeg, image/webp" onChange={handleRefFilesChange} />
+                        <button onClick={() => { setIsCapturingForRef(true); setIsCameraOpen(true); }} className="p-1 rounded-full text-cyan-400 hover:text-cyan-300 hover:bg-white/10 transition-colors" aria-label="FÄ o pozÄ de referinČ›Ä">
+                            <CameraIcon className="w-5 h-5" />
+                        </button>
+                    </div>
+                </div>
+                {refImageUrls.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                        {refImageUrls.map((url, index) => (
+                            <div key={index} className="relative w-12 h-12 rounded-md overflow-hidden group">
+                                <img src={url} alt={`Ref ${index+1}`} className="w-full h-full object-cover" />
+                                <button onClick={() => removeRefImage(index)} className="absolute top-0.5 right-0.5 p-0.5 bg-black/60 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <XCircleIcon className="w-4 h-4" />
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+            
+            <button
+                onClick={handleAuditClick}
+                disabled={!mainImageFile || isLoading}
+                className="w-full bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-teal)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed text-black font-bold py-2 px-4 rounded-lg transition-all duration-300 neon-accent"
+            >
+                {isLoading ? 'Se proceseazÄ...' : `RuleazÄ Audit ${category}`}
+            </button>
+        </div>
+        </>
+    );
+};
+
+export default AuditCategoryCard;
+
+
+---------------------------------
+### FILE: AuditLogItem.tsx
+---------------------------------
+// Importuri React Č™i hooks
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+// Importuri tipuri Č™i componente
+import { AuditLog, AuditReport, Feedback, Deviation, BoundingBox } from '../types';
+import { TrashIcon, ArrowDownTrayIcon } from './icons';
+import AuditResultDisplay from './AuditResultDisplay';
+import html2canvas from 'html2canvas';
+import { jsPDF } from 'jspdf';
+
+// InterfaČ›a pentru props-urile componentei
+interface AuditLogItemProps {
+  log: AuditLog;
+  isExpanded: boolean;
+  onToggleExpand: () => void;
+  feedback?: Feedback;
+  onFeedbackSubmit: (feedback: Omit<Feedback, 'timestamp'>) => void;
+  onDeleteAudit: (logId: string) => void;
+}
+
+// FuncČ›ie pentru a scala vizual impactul unei deviaČ›ii (grosime linie, opacitate)
+const impactScale = (finalImpact: number) => {
+  const clampedImpact = Math.max(1, Math.min(50, finalImpact));
+  const normalized = (clampedImpact - 1) / 49;
+  const eased = Math.pow(normalized, 1.5); // Easing pentru un efect vizual mai plÄcut
+  return {
+    strokeWidth: 1.5 + eased * 2.5,
+    opacity: 0.7 + eased * 0.3,
+  };
+};
+
+// ConverteČ™te coordonatele normalizate (0-1) ale unui bounding box Ă®n pixeli
+const boundingBoxToPixels = (
+  box: BoundingBox,
+  displayWidth: number,
+  displayHeight: number
+): { x: number; y: number; width: number; height: number } => {
+  // FIX: Precizie maximÄ, fÄrÄ rotunjiri inutile
+  return {
+    x: box.x * displayWidth,
+    y: box.y * displayHeight,
+    width: box.width * displayWidth,
+    height: box.height * displayHeight
+  };
+};
+
+// NOU: FuncČ›ie pentru a genera o cale SVG pentru un cerc cu aspect organic
+const generateOrganicCirclePath = (cx: number, cy: number, r: number, seed: number): string => {
+    const points = 8; // NumÄrul de puncte de control pentru cerc
+    const angleStep = (Math.PI * 2) / points;
+    const pathParts: string[] = [];
+
+    // FuncČ›ie de "jitter" pentru a adÄuga imperfecČ›iuni
+    const jitter = (val: number, jitterSeed: number, amplitude: number) => {
+        const noise = Math.sin(jitterSeed * 12.9898 + seed * 4.1414) * 43758.5453;
+        return val + (noise - Math.floor(noise) - 0.5) * amplitude;
+    };
+
+    let firstPoint = { x: 0, y: 0 };
+    for (let i = 0; i <= points; i++) {
+        const angle = angleStep * i;
+        const radius = jitter(r, i, r * 0.15); // VariaČ›ie de 15% a razei
+        const x = cx + Math.cos(angle) * radius;
+        const y = cy + Math.sin(angle) * radius;
+        
+        if (i === 0) {
+            firstPoint = { x, y };
+            pathParts.push(`M ${x},${y}`);
+        } else {
+            const prevAngle = angleStep * (i - 1);
+            const prevRadius = jitter(r, i - 1, r * 0.15);
+            const prevX = cx + Math.cos(prevAngle) * prevRadius;
+            const prevY = cy + Math.sin(prevAngle) * prevRadius;
+
+            const cp1Angle = prevAngle + angleStep * 0.33;
+            const cp1Radius = jitter(r, i * 10, r * 0.2);
+            const cp1x = cx + Math.cos(cp1Angle) * cp1Radius;
+            const cp1y = cy + Math.sin(cp1Angle) * cp1Radius;
+
+            const cp2Angle = angle + angleStep * -0.33;
+            const cp2Radius = jitter(r, i * 20, r * 0.2);
+            const cp2x = cx + Math.cos(cp2Angle) * cp2Radius;
+            const cp2y = cy + Math.sin(cp2Angle) * cp2Radius;
+            
+            if (i === points) {
+                 pathParts.push(`C ${cp1x},${cp1y} ${cp2x},${cp2y} ${firstPoint.x},${firstPoint.y}`);
+            } else {
+                 pathParts.push(`C ${cp1x},${cp1y} ${cp2x},${cp2y} ${x},${y}`);
+            }
+        }
+    }
+    pathParts.push('Z'); // ĂŽnchide calea
+    return pathParts.join(' ');
+};
+
+// FuncČ›ie care deseneazÄ un cerc de mĂ˘nÄ (Ă®nlocuieČ™te stilul zimČ›at)
+const generateHandDrawnCirclePath = (
+  pixelBox: { x: number; y: number; width: number; height: number; },
+  seed: number = 0
+): string => {
+  const { x, y, width, height } = pixelBox;
+  const cx = x + width / 2;
+  const cy = y + height / 2;
+  // Facem raza puČ›in mai mare decĂ˘t chenarul pentru a-l Ă®nconjura
+  const rx = width / 2 + 10;
+  const ry = height / 2 + 10;
+
+  const points = 12; // Mai multe puncte pentru o cale mai circularÄ Č™i finÄ
+  const angleStep = (Math.PI * 2) / points;
+  const pathParts: string[] = [];
+
+  // FuncČ›ie de "jitter" consistentÄ
+  const jitter = (jitterSeed: number, amplitude: number) => {
+    const noise = Math.sin(jitterSeed * 13.337 + seed * 7.7713) * 43758.5453;
+    return (noise - Math.floor(noise) - 0.5) * amplitude;
+  };
+
+  const controlPoints = [];
+  // GenerÄm puncte pentru cercul nostru neregulat
+  for (let i = 0; i < points; i++) {
+    const angle = angleStep * i;
+    // AdÄugÄm imperfecČ›iuni atĂ˘t la unghi, cĂ˘t Č™i la razÄ
+    const jitteredAngle = angle + jitter(i, 0.2);
+    const jitteredRx = rx + jitter(i * 2, rx * 0.25);
+    const jitteredRy = ry + jitter(i * 2 + 1, ry * 0.25);
+    
+    const px = cx + Math.cos(jitteredAngle) * jitteredRx;
+    const py = cy + Math.sin(jitteredAngle) * jitteredRy;
+    controlPoints.push({ x: px, y: py });
+  }
+
+  // ĂŽncepem calea la primul punct
+  pathParts.push(`M ${controlPoints[0].x.toFixed(2)},${controlPoints[0].y.toFixed(2)}`);
+
+  // CreÄm curbe line Ă®ntre puncte pentru a evita colČ›urile
+  for (let i = 0; i < points; i++) {
+    const p1 = controlPoints[i];
+    const p2 = controlPoints[(i + 1) % points];
+    
+    const midX = (p1.x + p2.x) / 2;
+    const midY = (p1.y + p2.y) / 2;
+    
+    // Punct de control pentru curba Bezier, pentru un aspect natural
+    const cpX = midX + jitter(i + 10, (p2.x - p1.x) * 0.2);
+    const cpY = midY + jitter(i + 11, (p2.y - p1.y) * 0.2);
+
+    pathParts.push(`Q ${cpX.toFixed(2)},${cpY.toFixed(2)} ${p2.x.toFixed(2)},${p2.y.toFixed(2)}`);
+  }
+
+  pathParts.push('Z'); // ĂŽnchidem calea
+  return pathParts.join(' ');
+};
+
+// Componenta principalÄ
+const AuditLogItem: React.FC<AuditLogItemProps> = ({
+  log,
+  isExpanded,
+  onToggleExpand,
+  onDeleteAudit,
+  feedback,
+  onFeedbackSubmit
+}) => {
+  const originalReport = log.result.isValid ? (log.result as AuditReport) : null;
+  const contentRef = useRef<HTMLDivElement>(null); // Ref pentru zona de printat
+  
+  // Stare simplificatÄ, FÄ‚RÄ‚ offsetX/offsetY
+  const [imageState, setImageState] = useState({
+    isLoaded: false,
+    displayWidth: 0,
+    displayHeight: 0,
+  });
+  
+  const imageRef = useRef<HTMLImageElement>(null);
+  const [debugMode, setDebugMode] = useState(false);
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+  
+  useEffect(() => {
+    const handleKeyPress = (e: KeyboardEvent) => {
+      if (e.key === 'd' || e.key === 'D') {
+        setDebugMode(prev => !prev);
+      }
+    };
+    window.addEventListener('keypress', handleKeyPress);
+    return () => window.removeEventListener('keypress', handleKeyPress);
+  }, []);
+  
+  const modifiedLog: AuditLog = useMemo(() => {
+    if (!originalReport) return log;
+    
+    const deviationsWithBox = (originalReport.deviationsFound || [])
+      .filter(d => d.boundingBox && d.boundingBox.width > 0 && d.boundingBox.height > 0)
+      .sort((a, b) => {
+        const yDiff = (a.boundingBox!.y - b.boundingBox!.y);
+        if (Math.abs(yDiff) > 0.05) return yDiff;
+        return a.boundingBox!.x - b.boundingBox!.x;
+      });
+    
+    const deviationsWithoutBox = (originalReport.deviationsFound || [])
+      .filter(d => !d.boundingBox || d.boundingBox.width <= 0 || d.boundingBox.height <= 0);
+    
+    return {
+      ...log,
+      result: {
+        ...originalReport,
+        deviationsFound: [...deviationsWithBox, ...deviationsWithoutBox],
+      }
+    };
+  }, [log, originalReport]);
+  
+  const report = modifiedLog.result.isValid ? (modifiedLog.result as AuditReport) : null;
+  
+  // FuncČ›ie de calcul simplificatÄ; mÄsoarÄ doar dimensiunile redate
+  const calculateImageDimensions = useCallback(() => {
+    const img = imageRef.current;
+    if (!img || !img.complete || !img.naturalWidth) return;
+    
+    const { offsetWidth, offsetHeight } = img;
+
+    const newState = {
+      isLoaded: true,
+      displayWidth: offsetWidth,
+      displayHeight: offsetHeight,
+    };
+    
+    if (
+      imageState.displayWidth !== newState.displayWidth || 
+      imageState.displayHeight !== newState.displayHeight
+    ) {
+      setImageState(newState);
+    }
+  }, [imageState.displayWidth, imageState.displayHeight]);
+  
+  // FIX: UseEffect optimizat pentru ResizeObserver
+  useEffect(() => {
+    if (!isExpanded) {
+      setImageState({ isLoaded: false, displayWidth: 0, displayHeight: 0 });
+      return;
+    }
+    
+    const img = imageRef.current;
+    if (!img) return;
+    
+    const handleLoad = () => {
+      // Folosim setTimeout pentru a aČ™tepta render complet
+      setTimeout(() => {
+        calculateImageDimensions();
+      }, 10);
+    };
+    
+    img.addEventListener('load', handleLoad);
+    if (img.complete) handleLoad();
+    
+    // Debounce pentru resize observer
+    let resizeTimeout: NodeJS.Timeout;
+    const resizeObserver = new ResizeObserver(() => {
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(calculateImageDimensions, 50);
+    });
+    resizeObserver.observe(img);
+    
+    return () => {
+      img.removeEventListener('load', handleLoad);
+      resizeObserver.disconnect();
+      clearTimeout(resizeTimeout);
+    };
+  }, [isExpanded, log.previewUrl, calculateImageDimensions]);
+  
+  const deviationAnnotations = useMemo(() => {
+    if (!report?.deviationsFound || !imageState.isLoaded || imageState.displayWidth === 0) {
+      return [];
+    }
+    
+    return report.deviationsFound
+      .filter(dev => dev.boundingBox && dev.finalImpact > 0)
+      .map((dev, index) => {
+        const { strokeWidth, opacity } = impactScale(dev.finalImpact);
+        const pixelBox = boundingBoxToPixels(dev.boundingBox!, imageState.displayWidth, imageState.displayHeight);
+        
+        const labelR = 13;
+        const labelPos = {
+            x: pixelBox.x + pixelBox.width + labelR * 0.4,
+            y: pixelBox.y - labelR * 0.4
+        };
+        const labelCirclePath = generateOrganicCirclePath(labelPos.x, labelPos.y, labelR, index);
+        const labelRotation = (Math.sin(index * 2.5) * 43758.5) % 15 - 7.5;
+
+        return {
+          ...dev,
+          originalIndex: index,
+          path: generateHandDrawnCirclePath(pixelBox, index),
+          pixelBox,
+          labelPos,
+          labelCirclePath,
+          labelRotation,
+          strokeWidth,
+          opacity,
+        };
+      });
+  }, [report?.deviationsFound, imageState]);
+  
+  const score = report?.score?.toString() ?? 'ERR';
+  const grade = report?.grade ?? 'Eroare';
+  
+  const getGradeColor = () => {
+    if (!report) return 'bg-[var(--accent-red)]';
+    switch (grade) {
+      case 'Very Good': return 'bg-[var(--accent-cyan)]';
+      case 'Good': return 'bg-[var(--accent-green)]';
+      case 'Needs Improvement': return 'bg-[var(--accent-yellow)]';
+      default: return 'bg-[var(--accent-red)]';
+    }
+  };
+  
+  const handleDelete = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onDeleteAudit(log.id);
+  };
+
+  const handleExportPDF = async (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (!contentRef.current) return;
+      setIsGeneratingPDF(true);
+
+      try {
+          const canvas = await html2canvas(contentRef.current, {
+              scale: 2, // Calitate mai bunÄ
+              useCORS: true, // Permite imagini cross-origin (dacÄ e cazul)
+              backgroundColor: '#050a15', // Background Ă®ntunecat
+              logging: false
+          });
+
+          const imgData = canvas.toDataURL('image/png');
+          const pdf = new jsPDF('p', 'mm', 'a4');
+          
+          const pdfWidth = pdf.internal.pageSize.getWidth();
+          const pdfHeight = pdf.internal.pageSize.getHeight();
+          const imgWidth = canvas.width;
+          const imgHeight = canvas.height;
+          
+          const ratio = Math.min(pdfWidth / imgWidth, pdfHeight / imgHeight);
+          const imgX = (pdfWidth - imgWidth * ratio) / 2;
+          const imgY = 10; // Margine sus
+
+          pdf.addImage(imgData, 'PNG', imgX, imgY, imgWidth * ratio, imgHeight * ratio);
+          pdf.save(`Audit_Showroom_${log.id.slice(0,8)}.pdf`);
+      } catch (error) {
+          console.error("Eroare la generarea PDF:", error);
+          alert("Nu s-a putut genera PDF-ul. VerificaČ›i consola.");
+      } finally {
+          setIsGeneratingPDF(false);
+      }
+  };
+  
+  return (
+    <div className="glass-panel rounded-xl overflow-hidden">
+      <div
+        className="w-full flex items-center justify-between p-3 text-left hover:bg-white/5 transition-colors relative cursor-pointer"
+        onClick={onToggleExpand}
+        aria-expanded={isExpanded}
+      >
+        <div className="flex items-center gap-4 overflow-hidden flex-1">
+          <img 
+            src={log.previewUrl} 
+            alt="thumbnail" 
+            className="w-16 h-12 object-cover rounded-lg bg-black/30 flex-shrink-0" 
+          />
+          <div className="flex-1 overflow-hidden">
+            <p className="font-semibold text-white truncate">{log.fileName}</p>
+            <p className="text-sm text-[var(--text-secondary)]">
+              {new Date(log.timestamp).toLocaleString('ro-RO')}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3 flex-shrink-0 ml-4">
+          <span className={`px-3 py-1 text-sm font-bold rounded-full whitespace-nowrap text-black ${getGradeColor()}`}>
+            {grade}
+          </span>
+          <div className="text-center w-16">
+            <p className="text-xs text-[var(--text-secondary)]">Scor</p>
+            <p className={`text-2xl font-bold mono ${!report ? 'text-[var(--accent-red)]' : 'text-white'}`}>{score}</p>
+          </div>
+          
+          {isExpanded && (
+             <button
+                onClick={handleExportPDF}
+                disabled={isGeneratingPDF}
+                className="p-2 rounded-full text-[var(--text-secondary)] hover:bg-cyan-500/20 hover:text-[var(--accent-cyan)] transition-colors"
+                aria-label="ExportÄ PDF"
+                title="ExportÄ PDF"
+             >
+                 <ArrowDownTrayIcon className={`w-5 h-5 ${isGeneratingPDF ? 'animate-pulse' : ''}`} />
+             </button>
+          )}
+
+          <button
+            onClick={handleDelete}
+            className="p-2 rounded-full text-[var(--text-secondary)] hover:bg-red-500/20 hover:text-[var(--accent-red)] transition-colors"
+            aria-label="Čterge audit"
+            title="Čterge audit"
+          >
+            <TrashIcon className="w-5 h-5" />
+          </button>
+        </div>
+      </div>
+      
+      {isExpanded && (
+        <div ref={contentRef} className="p-1 sm:p-2 md:p-4 border-t border-[var(--border-subtle)] bg-black/20">
+          <div className="flex flex-col gap-4">
+            
+            {debugMode && imageState.isLoaded && (
+              <div className="bg-black/80 text-green-400 p-2 rounded text-xs mono">
+                <div>Image: {imageState.displayWidth.toFixed(1)} x {imageState.displayHeight.toFixed(1)}px</div>
+                <div>Annotations: {deviationAnnotations.length}</div>
+                <div className="mt-1 text-yellow-400">ApasÄ D pentru a comuta modul debug</div>
+              </div>
+            )}
+            
+            {/* FIX PRINCIPAL: Container optimizat pentru aliniere perfectÄ */}
+            <div className="w-full rounded-xl overflow-hidden bg-black/90 border border-white/10 flex justify-center items-center">
+              <div 
+                className="relative inline-block"
+                style={{ 
+                  lineHeight: 0,
+                  fontSize: 0,
+                  position: 'relative'
+                }}
+              >
+                <img 
+                  ref={imageRef}
+                  src={log.previewUrl} 
+                  alt={`Audit for ${log.fileName}`} 
+                  className="block max-w-full max-h-full"
+                  style={{ 
+                    display: 'block',
+                    margin: 0,
+                    padding: 0,
+                    border: 0,
+                    verticalAlign: 'top',
+                    maxWidth: '100%',
+                    height: 'auto'
+                  }} 
+                  onLoad={() => {
+                    // ForČ›Äm recalcularea dupÄ Ă®ncÄrcare completÄ
+                    requestAnimationFrame(() => {
+                      calculateImageDimensions();
+                    });
+                  }}
+                />
+                
+                {imageState.isLoaded && imageState.displayWidth > 0 && deviationAnnotations.length > 0 && (
+                  <svg
+                    className="absolute pointer-events-none"
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: `${imageState.displayWidth}px`,
+                      height: `${imageState.displayHeight}px`
+                    }}
+                    viewBox={`0 0 ${imageState.displayWidth} ${imageState.displayHeight}`}
+                    preserveAspectRatio="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <defs>
+                        <filter id="fountainPenEffect">
+                            <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="5" result="turbulence"/>
+                            <feDisplacementMap in="SourceGraphic" in2="turbulence" scale="0.8" />
+                            <feGaussianBlur stdDeviation="0.2"/>
+                        </filter>
+                        <filter id="inkBleedEffect">
+                            <feMorphology operator="dilate" radius="0.5" in="SourceAlpha" result="dilate"/>
+                            <feGaussianBlur in="dilate" stdDeviation="1" result="blur"/>
+                            <feMerge>
+                                <feMergeNode in="blur" />
+                                <feMergeNode in="SourceGraphic" />
+                            </feMerge>
+                        </filter>
+                        <filter id="labelShadow">
+                            <feDropShadow dx="0.5" dy="1" stdDeviation="1" floodColor="#000000" floodOpacity="0.4"/>
+                        </filter>
+                    </defs>
+                    
+                    {debugMode && deviationAnnotations.map((dev) => (
+                      <rect
+                        key={`debug-${dev.originalIndex}`}
+                        x={dev.pixelBox.x} y={dev.pixelBox.y}
+                        width={dev.pixelBox.width} height={dev.pixelBox.height}
+                        fill="rgba(0,255,0,0.1)" stroke="lime" strokeWidth="1" strokeDasharray="3,3"
+                      />
+                    ))}
+                    
+                    {deviationAnnotations.map((dev) => (
+                      <g key={`annotation-${dev.originalIndex}`} opacity={dev.opacity} filter="url(#inkBleedEffect)">
+                        <path 
+                          d={dev.path} 
+                          fill="rgba(220, 38, 38, 0.1)" 
+                          stroke="none"
+                        />
+                        <path 
+                          d={dev.path} 
+                          fill="none" 
+                          stroke="#DC2626" 
+                          strokeWidth={dev.strokeWidth} 
+                          strokeLinecap="round" strokeLinejoin="round" 
+                          filter="url(#fountainPenEffect)"
+                        />
+                        <g 
+                           transform={`translate(0,0) rotate(${dev.labelRotation} ${dev.labelPos.x} ${dev.labelPos.y})`}
+                        >
+                            <g filter="url(#labelShadow)">
+                               <path
+                                  d={dev.labelCirclePath}
+                                  fill="#DC2626"
+                                  stroke="white"
+                                  strokeWidth="2"
+                               />
+                            </g>
+                            <text 
+                                textAnchor="middle" dominantBaseline="central"
+                                fill="white" fontSize="14" fontWeight="bold" 
+                                style={{ fontFamily: "'Caveat', cursive, system-ui", userSelect: 'none' }}
+                                x={dev.labelPos.x} y={dev.labelPos.y}
+                            >
+                                {dev.originalIndex + 1}
+                            </text>
+                        </g>
+                      </g>
+                    ))}
+                  </svg>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
+              <div className="flex flex-col h-full">
+                <h4 className="text-sm font-semibold text-[var(--text-secondary)] mb-2 flex-shrink-0 uppercase tracking-wider">
+                  Proces de GĂ˘ndire AI
+                </h4>
+                <div className="flex-grow glass-panel p-3 text-xs text-cyan-300/90 whitespace-pre-wrap overflow-y-auto pr-2 mono rounded-xl min-h-[200px] max-h-[50vh] custom-scrollbar">
+                  {log.thoughtProcess || 'Procesul de gĂ˘ndire nu a fost Ă®nregistrat.'}
+                </div>
+              </div>
+              
+              <div className="h-full max-h-[50vh] overflow-y-auto pr-2 custom-scrollbar">
+                <AuditResultDisplay
+                  log={modifiedLog}
+                  feedback={feedback}
+                  onFeedbackSubmit={onFeedbackSubmit}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default AuditLogItem;
+
+
+---------------------------------
+### FILE: AuditResultDisplay.tsx
+---------------------------------
+import React, { useMemo, memo } from 'react';
+import { AuditReport, Deviation, AuditLog, Feedback } from '../types';
+import { CheckCircleIcon, ExclamationTriangleIcon, InformationCircleIcon, XCircleIcon } from './icons';
+import FeedbackControls from './FeedbackControls';
+
+const GRADE_CONFIG: Record<string, { bg: string; text: string; border: string }> = {
+  'Very Good': { bg: 'bg-cyan-500/10', text: 'text-cyan-400', border: 'border-cyan-500/50' },
+  'Good': { bg: 'bg-green-500/10', text: 'text-green-400', border: 'border-green-500/50' },
+  'Needs Improvement': { bg: 'bg-yellow-500/10', text: 'text-yellow-400', border: 'border-yellow-500/50' },
+  'Sub Standard': { bg: 'bg-pink-500/10', text: 'text-pink-400', border: 'border-pink-500/50' },
+  'Default': { bg: 'bg-gray-500/10', text: 'text-gray-400', border: 'border-gray-500/50' }
+};
+
+const SEVERITY_CONFIG: Record<string, { bg: string; text: string }> = {
+  'MicÄ': { bg: 'bg-blue-500/20', text: 'text-blue-300' },
+  'Medie': { bg: 'bg-yellow-500/20', text: 'text-yellow-300' },
+  'Mare': { bg: 'bg-pink-500/20', text: 'text-pink-300' },
+  'MARE': { bg: 'bg-pink-500/20', text: 'text-pink-300' }, // Handle uppercase variant
+  'CRITICÄ‚': { bg: 'bg-red-600/30', text: 'text-red-400' },
+  'NotÄ': { bg: 'bg-gray-500/20', text: 'text-gray-300' }
+};
+
+const DeviationCard = memo<{ deviation: Deviation; index: number }>(({ deviation, index }) => {
+  const severityStyles = SEVERITY_CONFIG[deviation.severity] ?? SEVERITY_CONFIG['NotÄ'];
+  
+  return (
+    <article className="glass-panel p-3 rounded-xl hover:bg-white/5 transition-colors">
+      <header className="flex justify-between items-start gap-2">
+        <div className="flex items-start gap-3 flex-grow">
+            <div className="w-6 h-6 flex-shrink-0 rounded-full bg-pink-500/20 text-pink-300 font-bold text-sm flex items-center justify-center mt-0.5 mono">{index + 1}</div>
+            <p className="text-base font-bold text-white">{deviation.description}</p>
+        </div>
+        <span className={`flex-shrink-0 px-2 py-0.5 text-xs font-bold rounded-full whitespace-nowrap ${severityStyles.bg} ${severityStyles.text}`}>
+          {deviation.severity}
+        </span>
+      </header>
+      <div className="mt-2 text-xs text-[var(--text-secondary)] flex items-center gap-4 pl-9">
+        <span><strong className="text-gray-400">Categorie:</strong> {deviation.category}</span>
+        <span><strong className="text-gray-400">LocaČ›ie:</strong> {deviation.location}</span>
+        <span><strong className="text-gray-400">Impact:</strong> -{deviation.finalImpact}p</span>
+      </div>
+    </article>
+  );
+});
+
+export const AuditResultDisplay: React.FC<{ log: AuditLog, feedback?: Feedback, onFeedbackSubmit: (f: Omit<Feedback, 'timestamp'>) => void }> = ({ log, feedback, onFeedbackSubmit }) => {
+
+  const result = log.result;
+  // FIX: Use the 'in' operator for a more robust type guard. The simple `!result.isValid`
+  // check was not sufficient for TypeScript to correctly narrow the union type.
+  if ('error' in result) {
+    return (
+      <div className="text-center p-6 bg-yellow-900/50 rounded-xl text-yellow-300 border border-yellow-700">
+        <ExclamationTriangleIcon className="w-12 h-12 mx-auto mb-4" />
+        <h3 className="font-bold text-xl mb-2">AnalizÄ EČ™uatÄ</h3>
+        <pre className="text-sm text-left mono whitespace-pre-wrap bg-black/20 p-2 rounded-md">{result.error}</pre>
+      </div>
+    );
+  }
+
+  const report = result;
+  const statusStyles = GRADE_CONFIG[report.grade] ?? GRADE_CONFIG['Default'];
+
+  return (
+    <>
+      <main className="w-full text-left space-y-6">
+        <section className={`p-4 rounded-xl border ${statusStyles.border} ${statusStyles.bg}`}>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className={`text-sm font-bold uppercase tracking-wider ${statusStyles.text}`}>Status General</p>
+              <p className="text-2xl font-bold text-white mt-1">{report.grade}</p>
+            </div>
+            <div className="text-center">
+              <p className={`text-sm font-bold uppercase tracking-wider ${statusStyles.text}`}>Scor</p>
+              <p className="text-4xl font-extrabold text-white mono">{report.score}</p>
+            </div>
+          </div>
+        </section>
+
+        <section className="glass-panel p-4 rounded-xl">
+          <h3 className="text-lg font-bold text-cyan-300 flex items-center gap-2"><InformationCircleIcon className="w-6 h-6" /> Detaliere Scor</h3>
+          <p className="mt-2 text-sm text-[var(--text-secondary)] italic">"{report.scoringBreakdown}"</p>
+          <div className="text-xs grid grid-cols-2 gap-x-4 pt-2 mt-2 border-t border-[var(--border-subtle)]">
+            <p><strong className="text-gray-400">Categorie:</strong> <span className="mono text-cyan-300">{report.category}</span></p>
+            <p><strong className="text-gray-400">ĂŽncredere:</strong> <span className="mono text-cyan-300">{report.confidence}%</span></p>
+          </div>
+        </section>
+
+        {report.deviationsFound.length > 0 && (
+          <section className="space-y-3">
+            <h3 className="text-lg font-bold text-pink-400 flex items-center gap-2"><XCircleIcon className="w-6 h-6" /> Probleme Identificate ({report.deviationsFound.length})</h3>
+            {report.deviationsFound.map((dev, idx) => <DeviationCard key={idx} deviation={dev} index={idx} />)}
+          </section>
+        )}
+
+        {report.conformityPoints.length > 0 && (
+          <section className="space-y-2">
+            <h3 className="text-lg font-bold text-cyan-400 flex items-center gap-2"><CheckCircleIcon className="w-6 h-6" /> Aspecte Pozitive</h3>
+            <ul className="list-disc list-inside text-sm text-[var(--text-secondary)]">
+              {report.conformityPoints.map((point, idx) => <li key={idx}>{point}</li>)}
+            </ul>
+          </section>
+        )}
+        
+        {report.recommendations.length > 0 && (
+          <section>
+            <h3 className="text-lg font-bold text-green-400 flex items-center gap-2"><CheckCircleIcon className="w-6 h-6" /> RecomandÄri AcČ›ionabile</h3>
+            <ul className="list-disc list-inside mt-2 space-y-1 text-[var(--text-secondary)]">
+              {report.recommendations.map((rec, idx) => <li key={idx}>{rec}</li>)}
+            </ul>
+          </section>
+        )}
+
+        {report.deviationsFound.length === 0 && (
+          <div className="text-center text-gray-400 p-4 glass-panel rounded-xl">
+            <p className="font-semibold">âś“ Nicio problemÄ majorÄ identificatÄ.</p>
+          </div>
+        )}
+      </main>
+      <FeedbackControls 
+        auditId={log.id} 
+        currentFeedback={feedback} 
+        onSubmit={onFeedbackSubmit}
+      />
+    </>
+  );
+};
+
+export default memo(AuditResultDisplay);
+
+
+---------------------------------
+### FILE: FeedbackControls.tsx
+---------------------------------
+
+
+import React, { useState, useEffect } from 'react';
+import { Feedback } from '../types';
+import { CheckCircleIcon, XCircleIcon } from './icons';
+
+interface FeedbackControlsProps {
+    auditId: string;
+    currentFeedback?: Feedback;
+    onSubmit: (feedback: Omit<Feedback, 'timestamp'>) => void;
+}
+
+const FeedbackControls: React.FC<FeedbackControlsProps> = ({ auditId, currentFeedback, onSubmit }) => {
+    const [validation, setValidation] = useState<'correct' | 'incorrect' | null>(currentFeedback?.validation || null);
+    const [comment, setComment] = useState(currentFeedback?.comment || '');
+
+    useEffect(() => {
+        setValidation(currentFeedback?.validation || null);
+        setComment(currentFeedback?.comment || '');
+    }, [currentFeedback]);
+
+    const handleValidation = (newValidation: 'correct' | 'incorrect') => {
+        setValidation(newValidation);
+        onSubmit({
+            auditId,
+            validation: newValidation,
+            comment: newValidation === 'correct' ? '' : comment,
+        });
+        if (newValidation === 'correct') {
+            setComment('');
+        }
+    };
+    
+    const handleCommentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        setComment(e.target.value);
+    };
+
+    const handleCommentBlur = () => {
+        if (validation === 'incorrect') {
+            onSubmit({ auditId, validation, comment });
+        }
+    };
+
+    return (
+        <div className="mt-6 border-t border-[var(--border-subtle)] pt-4">
+            <h4 className="text-sm font-semibold text-center text-[var(--text-secondary)] mb-3">Acest audit a fost corect?</h4>
+            <div className="flex justify-center gap-4">
+                <button
+                    onClick={() => handleValidation('correct')}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                        validation === 'correct'
+                            ? 'bg-green-500/20 text-[var(--accent-green)] ring-2 ring-[var(--accent-green)]'
+                            : 'bg-white/5 hover:bg-white/10 text-[var(--text-secondary)]'
+                    }`}
+                >
+                    <CheckCircleIcon className="w-5 h-5" /> Corect
+                </button>
+                <button
+                    onClick={() => handleValidation('incorrect')}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                        validation === 'incorrect'
+                            ? 'bg-red-500/20 text-[var(--accent-red)] ring-2 ring-[var(--accent-red)]'
+                            : 'bg-white/5 hover:bg-white/10 text-[var(--text-secondary)]'
+                    }`}
+                >
+                    <XCircleIcon className="w-5 h-5" /> Incorect
+                </button>
+            </div>
+            {validation === 'incorrect' && (
+                <div className="mt-4">
+                    <textarea
+                        value={comment}
+                        onChange={handleCommentChange}
+                        onBlur={handleCommentBlur}
+                        placeholder="LasÄ un comentariu despre ce a fost greČ™it..."
+                        className="w-full h-24 p-2 bg-black/20 rounded-lg text-sm text-[var(--text-primary)] border border-transparent focus:border-[var(--accent-pink)] focus:ring-0 transition-colors"
+                    />
+                </div>
+            )}
+        </div>
+    );
+};
+
+export default FeedbackControls;
+
+
+---------------------------------
+### FILE: icons.tsx
+---------------------------------
+
+import React from 'react';
+
+export const UploadIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0l-3.75 3.75M12 9.75l3.75 3.75M3 17.25V21h18v-3.75M3 12h18M3 6.75h18" />
+    </svg>
+);
+
+export const CheckCircleIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+);
+
+export const ExclamationTriangleIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+    </svg>
+);
+
+export const LightBulbIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M12 18v-5.25m0 0a6.01 6.01 0 001.5-11.625a6.01 6.01 0 00-3 0 6.01 6.01 0 001.5 11.625zM9 18h6" />
+  </svg>
+);
+
+export const CameraIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.776 48.776 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z" />
+  </svg>
+);
+
+export const PauseIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25v13.5m-6-13.5v13.5" />
+  </svg>
+);
+
+export const PlayIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
+  </svg>
+);
+
+export const InformationCircleIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+    </svg>
+);
+
+export const XCircleIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+);
+
+export const TrashIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+    </svg>
+);
+
+export const ArchiveBoxIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
+  </svg>
+);
+
+export const ViewColumnsIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125a1.125 1.125 0 00-1.125 1.125v12.75c0 .621.504 1.125 1.125 1.125z" />
+    </svg>
+);
+
+export const CubeTransparentIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" />
+    </svg>
+);
+
+export const PlusCircleIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v6m3-3H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+  </svg>
+);
+
+export const PhotoIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+  </svg>
+);
+
+export const FolderOpenIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 00-1.883 2.542l.857 6a2.25 2.25 0 002.227 1.932H19.05a2.25 2.25 0 002.227-1.932l.857-6a2.25 2.25 0 00-1.883-2.542m-16.5 0A2.25 2.25 0 016 7.5h3.75m-3.75 0h.008v.015h-.008V9.776zm0 0h16.5m-16.5 0a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25h16.5a2.25 2.25 0 002.25-2.25V12a2.25 2.25 0 00-2.25-2.25m-16.5 0h16.5" />
+    </svg>
+);
+
+export const ArrowLeftIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
+    </svg>
+);
+
+export const ChartBarIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
+    </svg>
+);
+
+export const ArrowUpCircleIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M15 11.25l-3-3m0 0l-3 3m3-3v7.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+);
+
+export const ArrowDownCircleIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75l3 3m0 0l3-3m-3 3v-7.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+);
+
+export const ArrowDownTrayIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+    </svg>
+);
+
+
+---------------------------------
+### FILE: ImageViewer.tsx
+---------------------------------
+import React, { useState, useRef, useEffect } from 'react';
+import type { Deviation } from '../types';
+
+interface ImageViewerProps {
+  imageUrl: string;
+  deviations: Deviation[];
+  activeDeviationIndex: number | null;
+}
+
+// FIX: Expanded color map to cover all severity levels and ensure consistency with AuditResultDisplay.
+const SEVERITY_COLORS: Record<string, string> = {
+    'CRITICÄ‚': 'rgba(220, 38, 38, 0.7)',   // red-600
+    'Mare': 'rgba(236, 72, 153, 0.7)',    // pink-500
+    'Medie': 'rgba(234, 179, 8, 0.7)',    // yellow-500
+    'MicÄ': 'rgba(59, 130, 246, 0.7)',     // blue-500
+    'NotÄ': 'rgba(107, 114, 128, 0.7)',   // gray-500
+    'default': 'rgba(107, 114, 128, 0.7)', // fallback gray
+};
+
+export const ImageViewer: React.FC<ImageViewerProps> = ({ imageUrl, deviations, activeDeviationIndex }) => {
+  const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
+  const imageRef = useRef<HTMLImageElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // This function measures the rendered size of the image element and updates the state.
+  const updateImageSize = () => {
+    if (imageRef.current) {
+      const { offsetWidth, offsetHeight } = imageRef.current;
+      // Only update state if the size has actually changed to avoid re-render loops.
+      if (imageSize.width !== offsetWidth || imageSize.height !== offsetHeight) {
+        setImageSize({ width: offsetWidth, height: offsetHeight });
+      }
+    }
+  };
+
+  // Run the measurement when the image URL changes and the image loads.
+  useEffect(() => {
+    const img = imageRef.current;
+    if (!img) return;
+
+    img.addEventListener('load', updateImageSize);
+    // If image is already loaded (e.g., from cache), measure it immediately.
+    if (img.complete) {
+      updateImageSize();
+    }
+
+    return () => {
+      img.removeEventListener('load', updateImageSize);
+    };
+  }, [imageUrl]); // Rerun when imageUrl changes
+
+  // Use a ResizeObserver to re-measure the image whenever its container changes size.
+  // This handles window resizing, flexbox changes, etc.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    
+    const resizeObserver = new ResizeObserver(() => {
+      // We delay the update slightly to ensure the browser has finished layout calculations.
+      requestAnimationFrame(updateImageSize);
+    });
+    
+    resizeObserver.observe(container);
+    return () => resizeObserver.disconnect();
+  }, []);
+
+  return (
+    // The outer div provides the background, padding, and flex centering.
+    <div ref={containerRef} className="relative w-full h-full rounded-lg overflow-hidden glass-panel p-2 flex items-center justify-center">
+      {/* FIX: A new relative container is added to wrap the image and the SVG overlay.
+          This ensures the SVG's absolute positioning is relative to the image itself,
+          not the outer centered container, fixing the annotation offset bug. */}
+      <div className="relative inline-block">
+        <img
+          ref={imageRef}
+          src={imageUrl}
+          alt="Showroom audit"
+          className="block max-w-full max-h-full object-contain rounded-md"
+        />
+        {deviations.length > 0 && imageSize.width > 0 && (
+          <svg
+            className="absolute top-0 left-0 pointer-events-none"
+            width={imageSize.width}
+            height={imageSize.height}
+            viewBox={`0 0 ${imageSize.width} ${imageSize.height}`}
+          >
+            {deviations.map((dev, index) => (
+              dev.boundingBox && (
+                  <rect
+                      key={index}
+                      x={dev.boundingBox.x * imageSize.width}
+                      y={dev.boundingBox.y * imageSize.height}
+                      width={dev.boundingBox.width * imageSize.width}
+                      height={dev.boundingBox.height * imageSize.height}
+                      className={`transition-all duration-300 ease-in-out stroke-white`}
+                      fill={SEVERITY_COLORS[dev.severity] || SEVERITY_COLORS.default}
+                      strokeWidth={activeDeviationIndex === index ? 4 : 2}
+                      style={{
+                          opacity: activeDeviationIndex === null || activeDeviationIndex === index ? 1 : 0.2,
+                      }}
+                  />
+              )
+            ))}
+          </svg>
+        )}
+      </div>
+    </div>
+  );
+};
+
+
+---------------------------------
+### FILE: LoadingSpinner.tsx
+---------------------------------
+import React, { useEffect, useRef, useState } from "react";
+import { PROJECT_FILES as initialProjectFiles } from '../config/loading-code-reels';
+
+interface LoadingSpinnerProps {
+  realThoughtProcess: string | null;
+  onAnimationComplete: () => void;
+}
+
+const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({ realThoughtProcess, onAnimationComplete }) => {
+  // Starea fiČ™ierelor (codul sursÄ)
+  const [projectFiles, setProjectFiles] = useState([...(initialProjectFiles || [])]);
+
+  // UI State
+  const [activeFile, setActiveFile] = useState(0);
+  const [highlightedLine, setHighlightedLine] = useState(-1);
+  const [cursorPosition, setCursorPosition] = useState(0);
+  const [openTabs, setOpenTabs] = useState<number[]>([0]); // ĂŽncepem cu primul tab
+  const [isFadingOut, setIsFadingOut] = useState(false);
+  const [statusMessage, setStatusMessage] = useState("AI initializing audit protocols...");
+  
+  // Refs pentru controlul animaČ›iei
+  const timersRef = useRef<number[]>([]);
+  const animationStateRef = useRef<"scanning" | "revealing" | "done">("scanning");
+  const codeContainerRef = useRef<HTMLDivElement>(null);
+
+  // Cleanup la unmount
+  useEffect(() => {
+    return () => timersRef.current.forEach(timerId => clearTimeout(timerId as any));
+  }, []);
+
+  // ============================================================
+  // 1. ANIMAČšIA DE SCANARE (SecvenČ›ialÄ - Trece prin fiČ™iere)
+  // ============================================================
+  useEffect(() => {
+    // DacÄ deja avem rÄspunsul sau nu suntem Ă®n mod scanare, ieČ™im
+    if (realThoughtProcess || animationStateRef.current !== "scanning") return;
+
+    let currentFileIdx = activeFile;
+    let currentLineIdx = 0;
+
+    const scanNextLine = () => {
+      if (animationStateRef.current !== "scanning") return;
+
+      const file = projectFiles[currentFileIdx];
+      // Safety check
+      if (!file) {
+        // DacÄ ceva e greČ™it, resetÄm la 0
+        currentFileIdx = 0;
+        return;
+      }
+
+      const lines = file.content.split('\n');
+
+      // DacÄ mai avem linii Ă®n fiČ™ierul curent
+      if (currentLineIdx < lines.length) {
+        setHighlightedLine(currentLineIdx);
+        
+        // Calcul poziČ›ie cursor (24px Ă®nÄlČ›ime linie)
+        const newCursorPos = currentLineIdx * 24;
+        setCursorPosition(newCursorPos);
+
+        // Auto-scroll lin
+        if (codeContainerRef.current) {
+            const containerHeight = codeContainerRef.current.clientHeight;
+            // Čšinem cursorul undeva la mijlocul ecranului
+            const scrollTarget = newCursorPos - (containerHeight / 2) + 50;
+            codeContainerRef.current.scrollTo({ top: Math.max(0, scrollTarget), behavior: 'smooth' });
+        }
+
+        const lineContent = lines[currentLineIdx];
+
+        // Mesaje de status Ă®n funcČ›ie de ce citeČ™te
+        if (lineContent.includes('AUDIT_CONFIG') || lineContent.includes('rules')) setStatusMessage("Reading configuration matrix...");
+        else if (lineContent.includes('interface') || lineContent.includes('type')) setStatusMessage("Validating data schemas...");
+        else if (lineContent.includes('export') || lineContent.includes('return')) setStatusMessage("Analyzing export modules...");
+
+        currentLineIdx++;
+
+        // VITEZA DE CITIRE (Mai lentÄ, sÄ parÄ cÄ "citeČ™te")
+        let delay = 80; 
+        if (lineContent.trim().length > 60) delay = 150; // Linii lungi
+        if (lineContent.trim().length === 0) delay = 40;  // Linii goale
+
+        const timer = setTimeout(scanNextLine, delay);
+        timersRef.current.push(timer as any);
+      } 
+      else {
+        // S-a terminat fiČ™ierul curent. Trecem la urmÄtorul.
+        const nextFileIdx = (currentFileIdx + 1) % projectFiles.length; // Loop doar dacÄ terminÄ tot
+        
+        currentFileIdx = nextFileIdx;
+        currentLineIdx = 0;
+
+        // SchimbÄm Tab-ul vizual
+        setActiveFile(nextFileIdx);
+        
+        // GestionÄm tab-urile deschise (sÄ nu se aglomereze, pÄstrÄm doar 3)
+        setOpenTabs(prev => {
+            if (prev.includes(nextFileIdx)) return prev;
+            const newTabs = [...prev, nextFileIdx];
+            if (newTabs.length > 3) return newTabs.slice(1); // Scoatem primul dacÄ sunt prea multe
+            return newTabs;
+        });
+
+        setStatusMessage(`Opening ${projectFiles[nextFileIdx].path}...`);
+
+        // PauzÄ micÄ Ă®ntre fiČ™iere
+        const timer = setTimeout(scanNextLine, 1200);
+        timersRef.current.push(timer as any);
+      }
+    };
+
+    // Start scan
+    const startTimer = setTimeout(scanNextLine, 500);
+    timersRef.current.push(startTimer as any);
+
+  }, []); // RuleazÄ o singurÄ datÄ la montare (logica internÄ se ocupÄ de buclÄ)
+
+
+  // ============================================================
+  // 2. PREGÄ‚TIRE THOUGHT PROCESS (CĂ˘nd vine rÄspunsul de la AI)
+  // ============================================================
+  useEffect(() => {
+    if (!realThoughtProcess) return;
+
+    // 1. OPRIM ORICE SCANARE IMEDIAT
+    animationStateRef.current = "revealing";
+    timersRef.current.forEach(timerId => clearTimeout(timerId as any));
+    timersRef.current = [];
+
+    setStatusMessage("GENERATING REASONING LOG...");
+
+    // 2. CreÄm un fiČ™ier virtual nou pentru gĂ˘ndire
+    const thoughtFile = {
+      path: "AI_REASONING_LOG.md", // Nume fiČ™ier
+      language: "markdown",
+      content: realThoughtProcess
+    };
+
+    // 3. ĂŽl adÄugÄm Ă®n listÄ Č™i Ă®l activÄm
+    setProjectFiles(prev => {
+      const newFiles = [...prev, thoughtFile];
+      const thoughtIndex = newFiles.length - 1;
+      
+      // ResetÄm UI-ul pentru noul fiČ™ier
+      setActiveFile(thoughtIndex);
+      setOpenTabs(prev => [...prev, thoughtIndex]); // AdÄugÄm tab-ul nou la sfĂ˘rČ™it
+      setHighlightedLine(-1);
+      setCursorPosition(0);
+      
+      return newFiles;
+    });
+
+  }, [realThoughtProcess]);
+
+
+  // ============================================================
+  // 3. ANIMAČšIA DE SCRIERE (Typewriter Effect pentru Thought Process)
+  // ============================================================
+  useEffect(() => {
+    // Pornim doar dacÄ suntem Ă®n modul revealing Č™i avem fiČ™ierul de gĂ˘ndire activ
+    if (animationStateRef.current === "revealing" && activeFile === projectFiles.length - 1) {
+        
+        const file = projectFiles[activeFile];
+        const lines = file.content.split('\n');
+        let lineIdx = 0;
+
+        // ResetÄm scroll-ul sus la Ă®nceput
+        if (codeContainerRef.current) {
+            codeContainerRef.current.scrollTop = 0;
+        }
+
+        const typeWriterLoop = () => {
+            if (lineIdx >= lines.length) {
+                // FINALIZARE
+                setStatusMessage("AUDIT COMPLETE. RENDERING REPORT...");
+                
+                // Aici e "oleaca" de pauzÄ. AČ™teptÄm 2.5 secunde sÄ vadÄ omul ce s-a scris
+                setTimeout(() => {
+                    setIsFadingOut(true);
+                    setTimeout(onAnimationComplete, 1000); // Timp pentru fade-out
+                }, 2500); 
+                return;
+            }
+
+            // Highlight linia curentÄ
+            setHighlightedLine(lineIdx);
+            const newCursorPos = lineIdx * 24;
+            setCursorPosition(newCursorPos);
+
+            // Scroll logic - urmÄreČ™te cursorul
+            if (codeContainerRef.current) {
+                 const containerHeight = codeContainerRef.current.clientHeight;
+                 // PÄstrÄm cursorul mai jos ca sÄ se vadÄ contextul de sus (ce a scris deja)
+                 if (newCursorPos > containerHeight / 2) {
+                    codeContainerRef.current.scrollTop = newCursorPos - (containerHeight / 2);
+                 }
+            }
+
+            lineIdx++;
+
+            // VitezÄ de scriere variabilÄ (naturalÄ)
+            // Mai rapidÄ decĂ˘t citirea, cÄ e output generat
+            let typeDelay = 30; 
+            if (lines[lineIdx - 1].length > 80) typeDelay = 50;
+
+            const timer = setTimeout(typeWriterLoop, typeDelay);
+            timersRef.current.push(timer as any);
+        };
+
+        // Pornim scrierea dupÄ o micÄ pauzÄ
+        const startDelay = setTimeout(typeWriterLoop, 600);
+        timersRef.current.push(startDelay as any);
+    }
+  }, [activeFile, projectFiles]); // Se declanČ™eazÄ cĂ˘nd activeFile devine fiČ™ierul de gĂ˘ndire
+
+
+  // ============================================================
+  // HELPERE VIZUALE
+  // ============================================================
+  const currentFile = projectFiles[activeFile] || { path: '', content: '', language: '' };
+  
+  // AfiČ™Äm doar liniile care au fost "scrise" deja Ă®n modul revealing
+  // Sau toate liniile Ă®n modul scanning
+  const visibleLines = animationStateRef.current === 'revealing' 
+     ? currentFile.content.split('\n').slice(0, highlightedLine + 1)
+     : currentFile.content.split('\n');
+
+  const highlightToken = (line: string) => {
+    // Syntax Highlighting Minimalist Turcoaz
+    let html = line
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/\/\/.*/g, '<span class="text-emerald-500/80 italic">$&</span>') // Comentarii
+      .replace(/(["'`])(?:(?=(\\?))\2.)*?\1/g, '<span class="text-orange-300">$&</span>') // Stringuri
+      .replace(/\b(export|import|const|let|var|function|return|interface|type|async|await)\b/g, '<span class="text-[#38e8ff] font-semibold">$&</span>') // Keywords
+      .replace(/\b(true|false|null|undefined)\b/g, '<span class="text-pink-400">$&</span>'); // Booleans
+
+    // Markdown specific styling
+    if (currentFile.language === 'markdown') {
+        if (line.startsWith('###')) html = `<span class="text-[#38e8ff] font-bold uppercase tracking-widest border-b border-[#38e8ff]/20 pb-1 inline-block w-full mt-2">${line}</span>`;
+        else if (line.startsWith('#')) html = `<span class="text-white font-bold text-lg border-b border-white/20 pb-1 inline-block w-full mb-2">${line}</span>`;
+        else if (line.trim().startsWith('-')) html = `<span class="text-gray-300 pl-2">â—Ź ${line.substring(1)}</span>`;
+        else if (line.includes(':')) html = line.replace(/(.*?):/, '<span class="text-[#38e8ff] font-semibold">$1:</span>');
+    }
+
+    return <span dangerouslySetInnerHTML={{ __html: html }} />;
+  };
+
+  return (
+    <div className={`fixed inset-0 z-[9999] flex items-center justify-center bg-[#050a15]/95 backdrop-blur-md transition-opacity duration-1000 ${isFadingOut ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+      
+      {/* Container Principal */}
+      <div className="w-full h-full sm:w-[95vw] sm:h-[90vh] bg-[#0c1324] rounded-lg shadow-[0_0_80px_rgba(56,232,255,0.1)] border border-[#38e8ff]/20 flex flex-col overflow-hidden font-mono text-sm relative">
+        
+        {/* Ambient Glow Top */}
+        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-[#38e8ff] to-transparent opacity-60 blur-[2px]"></div>
+
+        {/* Tabs Bar */}
+        <div className="flex bg-[#050a15] border-b border-[#38e8ff]/10 overflow-x-auto custom-scrollbar scrollbar-none">
+           {openTabs.map(tabIdx => {
+              const isActive = activeFile === tabIdx;
+              const file = projectFiles[tabIdx];
+              if (!file) return null;
+              return (
+                <div 
+                    key={tabIdx}
+                    className={`
+                        px-4 py-2.5 flex items-center gap-2 cursor-default transition-all border-r border-[#38e8ff]/5 min-w-[120px]
+                        ${isActive ? 'bg-[#0c1324] text-[#38e8ff] border-t-2 border-t-[#38e8ff]' : 'text-gray-500 bg-[#050a15] hover:bg-[#0c1324]/50'}
+                    `}
+                >
+                    {/* IconiČ›Ä fiČ™ier */}
+                    <span className={`w-2 h-2 rounded-sm ${file.language === 'markdown' ? 'bg-purple-500 shadow-[0_0_5px_purple]' : 'bg-blue-500'}`}></span>
+                    <span className="truncate font-medium">{file.path.split('/').pop()}</span>
+                </div>
+              )
+           })}
+        </div>
+
+        {/* Breadcrumbs & Info */}
+        <div className="px-4 py-1.5 bg-[#0c1324] text-gray-500 text-[11px] border-b border-[#38e8ff]/5 flex justify-between items-center select-none">
+             <div className="flex items-center gap-2">
+                <span>mobexpert-audit</span>
+                <span>/</span>
+                <span className="text-gray-300">{currentFile.path}</span>
+             </div>
+             <div className="flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
+                <span className="text-[#38e8ff]/70 tracking-wider">GEMINI 1.5 PRO</span>
+             </div>
+        </div>
+
+        {/* Editor Area */}
+        <div ref={codeContainerRef} className="flex-1 overflow-y-auto custom-scrollbar relative scroll-smooth bg-[#0c1324] pb-10">
+             <div className="flex min-h-full py-4">
+                {/* Line Numbers */}
+                <div className="w-12 flex-shrink-0 flex flex-col items-end pr-4 text-gray-700 select-none border-r border-[#38e8ff]/5 bg-[#0c1324]">
+                    {visibleLines.map((_, i) => (
+                        <div key={i} className={`h-6 leading-6 text-[11px] ${highlightedLine === i ? 'text-[#38e8ff] font-bold' : ''}`}>{i + 1}</div>
+                    ))}
+                </div>
+
+                {/* Code Content */}
+                <div className="flex-1 pl-4 relative">
+                    {/* Cursor Line Highlight */}
+                    <div 
+                        className="absolute left-0 right-0 h-6 bg-[#38e8ff]/5 border-l-2 border-[#38e8ff] transition-all duration-100 pointer-events-none"
+                        style={{ top: `${cursorPosition}px` }}
+                    />
+
+                    {visibleLines.map((line, i) => (
+                        <div 
+                            key={i} 
+                            className={`
+                                h-6 leading-6 whitespace-pre transition-all duration-200
+                                ${i === highlightedLine ? 'text-gray-100' : 'text-gray-400'}
+                            `}
+                        >
+                            {highlightToken(line)}
+                        </div>
+                    ))}
+                    
+                    {/* Blinking Block Cursor */}
+                    <div 
+                        className="absolute w-2 h-5 bg-[#38e8ff] opacity-50 animate-pulse transition-all duration-75 z-10 shadow-[0_0_10px_#38e8ff]"
+                        style={{ top: `${cursorPosition + 2}px`, left: '16px' }} // PoziČ›ionat generic la Ă®nceputul liniei
+                    ></div>
+                </div>
+             </div>
+        </div>
+
+        {/* Status Bar */}
+        <div className="h-8 bg-[#050a15] border-t border-[#38e8ff]/20 flex items-center justify-between px-4 text-xs text-[#38e8ff] select-none z-20">
+            <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2 bg-[#38e8ff]/10 px-3 py-0.5 rounded-full border border-[#38e8ff]/20">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#38e8ff] opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-[#38e8ff]"></span>
+                    </span>
+                    <span className="font-bold tracking-widest text-[10px]">COMET AI PROCESSING</span>
+                </div>
+                <span className="text-gray-400 hidden sm:inline-block animate-pulse font-mono">{statusMessage}</span>
+            </div>
+            
+            <div className="flex items-center gap-6 text-gray-600 font-medium">
+                <span>Ln {highlightedLine + 1}, Col 1</span>
+                <span className="hidden sm:inline">UTF-8</span>
+                <span className="text-[#38e8ff]">{currentFile.language === 'markdown' ? 'Markdown' : 'TypeScript'}</span>
+            </div>
+        </div>
+
+      </div>
+    </div>
+  );
+};
+
+export default LoadingSpinner;
+
+
+---------------------------------
+### FILE: StoreSummaryCard.tsx
+---------------------------------
+import React from 'react';
+import { ChartBarIcon, ArrowUpCircleIcon, ArrowDownCircleIcon } from './icons';
+
+interface StoreStats {
+  count: number;
+  avg: number | null;
+  min: number | null;
+  max: number | null;
+}
+
+interface StoreSummaryCardProps {
+  storeName: string;
+  stats: StoreStats;
+  onSelectStore: () => void;
+}
+
+const getHealthColor = (score: number | null) => {
+    if (score === null) return { bg: 'bg-gray-700/50', text: 'text-gray-400', border: 'border-gray-600' };
+    if (score >= 85) return { bg: 'bg-cyan-500/20', text: 'text-cyan-300', border: 'border-cyan-500' };
+    if (score >= 70) return { bg: 'bg-green-500/20', text: 'text-green-400', border: 'border-green-500' };
+    if (score >= 55) return { bg: 'bg-yellow-500/20', text: 'text-yellow-400', border: 'border-yellow-500' };
+    return { bg: 'bg-pink-500/20', text: 'text-pink-400', border: 'border-pink-500' };
+};
+
+const StatItem: React.FC<{ icon: React.FC<{className?: string}>, label: string, value: string | number | null, colorClass: string }> = ({ icon: Icon, label, value, colorClass }) => (
+    <div className="flex flex-col items-center text-center">
+        <Icon className={`w-7 h-7 mb-1 ${colorClass}`} />
+        <p className="text-xl font-bold mono text-white">{value ?? 'N/A'}</p>
+        <p className="text-xs text-[var(--text-secondary)] uppercase tracking-wider">{label}</p>
+    </div>
+);
+
+
+const StoreSummaryCard: React.FC<StoreSummaryCardProps> = ({ storeName, stats, onSelectStore }) => {
+    const healthColor = getHealthColor(stats.avg);
+
+    return (
+        <button 
+            onClick={onSelectStore} 
+            className="glass-panel p-6 rounded-2xl flex flex-col justify-between items-center text-center aspect-square transition-all duration-300 hover:bg-white/5 hover:scale-[1.03] focus-visible:scale-[1.03] focus-visible:border-cyan-400"
+        >
+            <h2 className="text-3xl font-bold text-white">Mobexpert {storeName}</h2>
+
+            <div className="flex flex-col items-center my-4">
+                <p className="text-sm font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-2">Health Score</p>
+                <div className={`w-32 h-32 rounded-full flex items-center justify-center border-4 ${healthColor.border} ${healthColor.bg}`}>
+                    <span className={`text-5xl font-extrabold mono ${healthColor.text}`}>{stats.avg ?? '--'}</span>
+                </div>
+            </div>
+
+            <div className="w-full grid grid-cols-3 gap-4 pt-4 border-t border-[var(--border-subtle)]">
+                <StatItem icon={ChartBarIcon} label="Audituri" value={stats.count} colorClass="text-gray-400" />
+                <StatItem icon={ArrowDownCircleIcon} label="Scor Min" value={stats.min} colorClass="text-pink-400" />
+                <StatItem icon={ArrowUpCircleIcon} label="Scor Max" value={stats.max} colorClass="text-cyan-400" />
+            </div>
+        </button>
+    );
+};
+
+export default StoreSummaryCard;
+
+
+---------------------------------
+### FILE: categories.ts
+---------------------------------
+// File removed
+
+
+---------------------------------
+### FILE: loading-code-reels.ts
+---------------------------------
+
+export const PROJECT_FILES = [
+  {
+    path: "services/prompt.ts",
+    language: "typescript",
+    content: `// prompt/v10.0-RO-PRO.js
+
+const AUDIT_CONFIG = {
+  version: "v10.0-RO-PRO",
+  language: "ro", // limba de ieČ™ire
+};
+
+// PRINCIPII â€” Ă®n romĂ˘nÄ (zero ambiguitÄČ›i)
+const EVALUATION_PRINCIPLES_RO = {
+  perspective: "Perspectiva unui client real aflat Ă®n showroom.",
+  distance: "DistanČ›Ä naturalÄ de vizualizare: 1â€“3 metri.",
+  timing: "Ce observÄ clientul Ă®n primele 10â€“30 secunde.",
+  tolerance: "Standard profesional retail, dar fÄrÄ perfecČ›ionism artificial."
+};
+
+const HUMAN_LOGIC_RULES_RO = \`
+1. â€žRegula de 10 secundeâ€ť
+   â€“ Vizibil imediat (â‰¤10 secunde)? â†’ Minim Mediu / Major.
+   â€“ NecesitÄ cÄutare activÄ? â†’ Mic / NotÄ.
+
+2. â€žPerspectiva de la distanČ›Ä normalÄâ€ť
+   â€“ Vizibil clar de la 1â€“2 m â†’ evaluare normalÄ.
+   â€“ Vizibil doar foarte aproape (<50 cm) â†’ reduce severitatea.
+
+3. â€žImpact asupra deciziei de cumpÄrareâ€ť
+   â€“ AfecteazÄ percepČ›ia produsului? â†’ Minim Mediu.
+   â€“ Pur estetic / minor â†’ Mic sau NotÄ.
+
+4. â€žContext funcČ›ionalâ€ť
+   â€“ Showroom activ (clienČ›i, miČ™care) â†’ toleranČ›Ä uČ™or mai mare.
+   â€“ ZonÄ principalÄ / wand principal â†’ tratament mai strict.
+
+5. â€žRegula verificÄrii dubleâ€ť
+   â€“ E defect real sau artefact vizual?
+   â€“ ExistÄ explicaČ›ie legitimÄ? â†’ NU se penalizeazÄ.
+
+6. â€žRegula proporČ›ionalitÄČ›iiâ€ť
+   â€“ Se evalueazÄ TOT cadrul, nu doar defectele.
+   â€“ 95% perfect + 5% minor â†’ scor Ă®ncÄ mare.
+\`;
+
+// PROMPTUL CENTRAL (OPTIMIZAT)
+const CORE_PROMPT = \`
+EČ™ti Mobexpert Visual Auditor \${AUDIT_CONFIG.version}, cea mai strictÄ Č™i deterministÄ versiune.
+
+Evaluezi showroom-uri EXCLUSIV din perspectiva unui client real care intrÄ Č™i priveČ™te 10â€“30 secunde.
+
+=====================================
+## 0. REGULA DE AUR
+DacÄ nu eČ™ti â‰Ą80% sigur cÄ este o problemÄ REALÄ‚ â†’ NU o raportezi. NiciodatÄ.
+=====================================
+
+=====================================
+## 1. BLOC â€žFAIL FASTâ€ť (OBLIGATORIU)
+DacÄ imaginea este:
+- depozit / hale / rafturi industriale / cutii stivuite,
+- ambalaje de transport predominante,
+- showroom neclar, blur masiv, luminÄ insuficientÄ masivÄ,
+- sau nu se poate determina produs + context,
+â†’ atunci output:
+{
+  "isValid": false,
+  "message": "Imagine nerelevantÄ sau inconcludentÄ pentru audit"
+}
+ČI TE OPREČTI. FÄrÄ Thought Process.
+=====================================
+
+## 2. PRINCIPII DE EVALUARE (OBLIGATORIU DE APLICAT)
+- PerspectivÄ: \${EVALUATION_PRINCIPLES_RO.perspective}
+- DistanČ›Ä: \${EVALUATION_PRINCIPLES_RO.distance}
+- Timp: \${EVALUATION_PRINCIPLES_RO.timing}
+- ToleranČ›Ä: \${EVALUATION_PRINCIPLES_RO.tolerance}
+
+\${HUMAN_LOGIC_RULES_RO}
+
+=====================================
+## 3. VALABILITATEA IMAGINII
+âś“ Valid: showroom real, produse expuse, etichete vizibile, luminÄ retail.
+âś— Invalid: depozit, cutii, logisticÄ â†’ vezi FAIL FAST.
+
+=====================================
+## 4. CATEGORIA PRODUSULUI (UNA SINGURÄ‚)
+- MOBILIER dacÄ >60% din cadru este mobilÄ â†’ praguri stricte.
+- ACCESORII dacÄ >60% din cadru sunt decoraČ›iuni â†’ praguri relaxate.
+- DacÄ e neclar â†’ MOBILIER.
+
+=====================================
+## 5. TABEL DE PENALIZARE (NUMAI ACESTE VALORI SUNT PERMISE)
+
+| Severitate | Mobilier | Accesorii | Exemple |
+|------------|----------|-----------|---------|
+| CRITICÄ‚    | 40       | 35        | ambalaj transport, avarie majorÄ, murdÄrie groasÄ, lichid pe podea |
+| Mare       | 20       | 15        | produs cÄzut, praf gros, lipsÄ preČ› la obiect principal |
+| Medie      | 12       | 9         | â‰Ą2 perne cÄzute, lipsÄ etichetÄ, nealiniere covor-mobilÄ >15Â° |
+| MicÄ       | 5        | 4         | o pernÄ deplasatÄ, etichetÄ Ă®ntoarsÄ, zgĂ˘rieturÄ micÄ |
+| NotÄ       | 2        | 1         | un punct de praf, etichetÄ puČ›in Ă®ndoitÄ |
+
+NU AI VOIE SÄ‚ FOLOSEČTI ALTE NUMERE.
+
+=====================================
+## 6. ZONE + MULTIPLIERI (se aplicÄ DUPÄ‚ penalizare, rotunjire ĂŽN SUS)
+- ZonÄ centralÄ (~50% din cadru) â†’ Ă—1.4
+- Laterale â†’ Ă—1.0
+- Fundal â†’ Ă—0.6
+
+=====================================
+## 7. CALCUL ĂŽNCREDERE (valorile permise)
+Confidence (%) = round(Clarity Ă— Angle Ă— Visibility Ă— Lighting Ă— 100)
+
+Clarity: 1.0 / 0.9 / 0.8  
+Visibility: 1.0 / 0.9 / 0.7  
+Lighting: 1.0 / 0.95 / 0.85 / 0.7
+
+ANGLE (definit complet):
+- 1.0 = â‰¤20Â°
+- 0.95 = 21â€“35Â°
+- 0.85 = 36â€“50Â°
+- 0.7 = >50Â°
+
+PRAG MINIM:
+- Mobilier â‰Ą75%
+- Accesorii â‰Ą60%
+Sub prag â†’ isValid:false + "Imagine inconcludentÄ pentru audit".
+
+=====================================
+## 8. STRUCTURA DE OUTPUT (OBLIGATORIE)
+
+### 1. THOUGHT PROCESS (Ă®n romĂ˘nÄ, EXACT 5 secČ›iuni numerotate)
+1) Prima impresie + Categoria dominantÄ + calculul Ă®ncrederii (cu matematicÄ explicitÄ).  
+2) Verificare penalizÄri critice (DA/NU pentru fiecare dintre: ambalaj transport, avarie majorÄ, lichid).  
+3) Toate deviaČ›iile (pentru fiecare: severitate exactÄ, regula umanÄ citatÄ, impact de bazÄ, zonÄ, multiplier, impact final).  
+4) Calcul multipliers (linie cu linie).  
+5) Calcul scor final (100 - ÎŁ(finalImpact), matematicÄ completÄ).
+
+### 2. JSON OUTPUT (chei Ă®n EN, valori Ă®n RO, ORDINE FIXÄ‚)
+{
+  "isValid": true/false,
+  "category": "mobilier" | "accesorii_deco",
+  "confidence": integer,
+  "score": integer,
+  "grade": "Very Good" | "Good" | "Average" | "Poor" | "Unacceptable",
+  "conformityPoints": ["string"],
+  "deviationsFound": [
+    {
+      "category": "aranjament/etichetare/curatenie/etc",
+      "severity": "CRITICÄ‚/Mare/Medie/MicÄ/NotÄ",
+      "description": "descriere clarÄ Ă®n romĂ˘nÄ",
+      "location": "zona_centrala/laterala/fundal",
+      "humanRule": "Regula X + Regula Y",
+      "baseImpact": number,
+      "zoneMultiplier": 1.4 | 1.0 | 0.6,
+      "finalImpact": number,
+      "boundingBox": {
+        "x": 0.XX,
+        "y": 0.XX,
+        "width": 0.XX,
+        "height": 0.XX
+      }
+    }
+  ],
+  "scoringBreakdown": "100 - (40Ă—1.4 + 12Ă—1.0 + 5Ă—0.6) = XX puncte",
+  "recommendations": ["acČ›iuni concrete Ă®n romĂ˘nÄ"]
+}
+\`;
+
+// EXPORT FINAL
+export const buildAuditPrompt = () => \`\${CORE_PROMPT}\`;`
+  },
+  {
+    path: "types.ts",
+    language: "typescript",
+    content: `export interface BoundingBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface Deviation {
+  category: string;
+  severity: string;
+  description: string;
+  location: string;
+  humanRule: string;
+  baseImpact: number;
+  zoneMultiplier: number;
+  finalImpact: number;
+  boundingBox?: BoundingBox;
+}
+
+export interface AuditReport {
+  isValid: true;
+  category: string;
+  confidence: number;
+  score: number;
+  grade: string;
+  conformityPoints: string[];
+  deviationsFound: Deviation[];
+  scoringBreakdown: string;
+  recommendations: string[];
+}
+
+export interface AuditLog {
+  id: string;
+  timestamp: string;
+  fileName: string;
+  thoughtProcess: string;
+  result: AuditReport | { isValid: false; error: string };
+}`
+  },
+  {
+    path: "App.tsx",
+    language: "tsx",
+    content: `const App: React.FC = () => {
+  const handleRunAudit = async () => {
+    setView('loading');
+    try {
+       // Call Gemini AI Vision Model
+       const result = await getVisualAudit(image);
+       setAuditLogs(prev => [result, ...prev]);
+       setView('detail');
+    } catch (error) {
+       console.error("Audit failed", error);
+    }
+  };
+  
+  return (
+    <div className="app-shell">
+       <Header />
+       <AuditResultDisplay />
+    </div>
+  );
+};`
+  }
+];
+
+
+---------------------------------
+### FILE: loading-snippets.ts
+---------------------------------
+// File removed
+
+
+---------------------------------
+### FILE: scoring.ts
+---------------------------------
+// File removed
+
+
+---------------------------------
+### FILE: geminiService.ts
+---------------------------------
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import type { AuditReport } from '../types';
+import { buildAuditPrompt } from './prompt';
+
+const REFERENCE_IMAGE_INSTRUCTION = `
+## IMAGINI DE REFERINČšÄ‚
+Čši-au fost furnizate imagini de referinČ›Ä care reprezintÄ standardul "perfect" sau "de aur". FoloseČ™te-le ca bazÄ principalÄ de comparaČ›ie pentru evaluarea ta. Abaterile de la aceste standarde trebuie penalizate.`;
+
+// Aici preluam cheia din .env.local
+const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+
+// Initializam clientul
+const genAI = new GoogleGenerativeAI(apiKey || "");
+
+function fileToGenerativePart(base64: string, mimeType: string) {
+  return {
+    inlineData: {
+      data: base64,
+      mimeType
+    },
+  };
+}
+
+function extractJson(text: string): AuditReport | null {
+    const cleanedText = text.replace(/```json/g, '').replace(/```/g, '');
+    const firstBrace = cleanedText.indexOf('{');
+    const lastBrace = cleanedText.lastIndexOf('}');
+    
+    if (firstBrace !== -1 && lastBrace !== -1) {
+        const jsonString = cleanedText.substring(firstBrace, lastBrace + 1);
+        try {
+            return JSON.parse(jsonString) as AuditReport;
+        } catch (e) {
+            console.error("EČ™ec la parsarea JSON:", e);
+            return null;
+        }
+    }
+    return null;
+}
+
+export const getVisualAudit = async (
+    imageBase64: string, 
+    mimeType: string,
+    category: 'Info Point Birouri' | 'Intrare' | 'Best Seller' | 'Rafturi',
+    referenceImages: { base64: string, mimeType: string }[]
+): Promise<{ thoughtProcess: string; result: AuditReport; }> => {
+    
+    // Folosim Gemini 1.5 Pro care e stabil si puternic
+    const model = genAI.getGenerativeModel({ model: "gemini-3-pro-preview" });
+
+    const auditPrompt = buildAuditPrompt();
+    const mainImagePart = fileToGenerativePart(imageBase64, mimeType);
+    const referenceImageParts = referenceImages.map(img => fileToGenerativePart(img.base64, img.mimeType));
+
+    const parts: any[] = [];
+    
+    if (referenceImageParts.length > 0) {
+        parts.push(REFERENCE_IMAGE_INSTRUCTION + "\n\n" + auditPrompt);
+        parts.push("--- Imagini de referinČ›Ä ---");
+        referenceImageParts.forEach(part => parts.push(part));
+    } else {
+        parts.push(auditPrompt);
+    }
+
+    parts.push("--- Imagine de auditat ---");
+    parts.push(mainImagePart);
+    
+    try {
+        const result = await model.generateContent(parts);
+        const response = await result.response;
+        const responseText = response.text();
+        
+        let thoughtProcess = "AnalizÄ efectuatÄ.";
+        const jsonStartIndex = responseText.indexOf('{');
+        if (jsonStartIndex > 0) {
+            thoughtProcess = responseText.substring(0, jsonStartIndex).trim();
+        }
+
+        const parsedResult = extractJson(responseText);
+
+        if (!parsedResult) {
+            throw new Error("Nu s-a putut genera un raport valid (JSON invalid).");
+        }
+
+        return {
+            thoughtProcess,
+            result: parsedResult
+        };
+
+    } catch (error) {
+        console.error("Eroare Gemini:", error);
+        throw error;
+    }
+};
+
+
+---------------------------------
+### FILE: prompt.ts
+---------------------------------
+const AUDIT_CONFIG = {
+  version: "v12.3-FULL-ENTERPRISE",
+  language: "ro",
+};
+
+// CATALOG DEFINITIV (LOGICÄ‚ EN / OUTPUT RO)
+const DEFECT_CATALOG = `
+| ID  | Category (Ref)  | Romanian Description (Output)            | Severity | Points (Furniture/Deco) |
+|-----|-----------------|------------------------------------------|----------|-------------------------|
+| D01 | Logistics       | Cutii, folii, paleČ›i vizibili Ă®n scenÄ   | CRITICÄ‚  | 40 / 35                 |
+| D02 | Safety          | Cioburi, lichid, cabluri neasigurate      | CRITICÄ‚  | 40 / 35                 |
+| D03 | Integrity       | Produs vizibil deteriorat/rupt/pÄtat     | CRITICÄ‚  | 40 / 35                 |
+| D11 | Availability    | "Gap" urĂ˘t Ă®n raft (rupere de ritm)      | Mare     | 20 / 15                 |
+| D04 | Pricing         | LipsÄ price-tag la piesa "erou"          | Mare     | 20 / 15                 |
+| D12 | Lighting        | Spot ars sau zonÄ Ă®ntunecatÄ neintenČ›ionat| Mare    | 20 / 15                 |
+| D06 | Alignment       | Covor strĂ˘mb vs mobilÄ / Tablouri strĂ˘mbe| Medie    | 12 / 9                  |
+| D07 | Textile Styling | Perne deranjate,asternuturi sifonate, PÄturi ghem| Medie   | 12 / 9                  |
+| D13 | Composition     | Produs "Orfan" (fÄrÄ context/decor)      | Medie    | 12 / 9                  |
+| D08 | Labeling        | EtichetÄ cÄzutÄ/Ă®ntoarsÄ                 | MicÄ     | 5  / 4                  |
+| D09 | Detail          | Scaune nealiniate la masÄ                | MicÄ     | 5  / 4                  |
+| D10 | Cleanliness     | Amprente pe sticlÄ/praf vizibil          | NotÄ     | 2  / 1                  |
+`;
+
+const CORE_PROMPT = `
+You are the Mobexpert AI Auditor ${AUDIT_CONFIG.version}, the strictest and most deterministic version.
+You evaluate showrooms EXCLUSIVELY from the perspective of a real customer entering and looking for 10-30 seconds.
+
+**Constraint:** You must process the logic in English, but generate the OUTPUT (Text and JSON) in ROMANIAN.
+
+### 1. FAIL FAST PROTOCOL (Mandatory)
+Analyze the image first. Return \`isValid: false\` and STOP if:
+- The image shows a raw warehouse / industrial racks / stacked boxes.
+- Transport packaging is dominant (>50%).
+- The image is massive blur / insufficient lighting.
+- It is impossible to determine product + context.
+
+### 2. EVALUATION PRINCIPLES (Re-integrated)
+- **Perspective:** Natural viewing distance (1-3 meters).
+- **Timing:** What the customer notices in the first 10-30 seconds.
+- **Tolerance:** Professional retail standard, but no artificial perfectionism.
+
+**HUMAN LOGIC RULES (Must be applied):**
+1. **The "10-Second Rule":**
+   - Visible immediately (â‰¤10 sec)? -> Severity: MINIMUM Medium / Major.
+   - Requires active searching? -> Severity: Low / Note.
+2. **Distance Perspective:**
+   - Clearly visible from 1-2m -> Normal evaluation.
+   - Visible only very close (<50cm) -> Reduce severity.
+3. **Purchase Decision Impact:**
+   - Affects product perception? -> Minimum Medium.
+   - Purely aesthetic / minor? -> Low or Note.
+4. **Double Check Rule:**
+   - Is it a real defect or a visual artifact/reflection?
+   - Is there a legitimate explanation? -> DO NOT PENALIZE.
+5. **Proportionality Rule:**
+   - Evaluate the WHOLE frame, not just defects.
+   - 95% perfect + 5% minor -> Score must remain high.
+
+### 3. PREMIUM MERCHANDISING STANDARDS
+**A. "Vignette" vs. "Storage" (Rule D13)**
+- **Violation:** A lone product sitting in a corner is an "Orphan Product". Furniture must be in lifestyle islands.
+
+**B. "Negative Space" vs. "Out of Stock" (Rule D11)**
+- **Violation (D11):** A visible, ugly gap *inside* a shelf sequence.
+- **Pass:** Wide spaces between furniture groupings (circulation zones).
+
+**C. Textile Styling (Rule D07)**
+- **Violation (D07):** Flat pillows, blankets looking like crumpled trash.
+- **Pass:** "Casual throw" (artistic), pillows with volume ("karate chop").
+
+### 4. SCORING & CONFIDENCE LOGIC
+**Confidence Calculation:**
+- Estimate Clarity (0.0-1.0), Angle (0.0-1.0), Lighting (0.0-1.0).
+- Final Confidence = Average of factors * 100.
+
+**Score Calculation:**
+- Final Score = 100 - Sum(finalImpact).
+- **Zone Multipliers:**
+  - **Central (Focal Point):** 1.4 (Highest priority).
+  - **Lateral:** 1.0.
+  - **Background:** 0.6.
+
+### 5. PENALTY CATALOG
+Use ONLY the following IDs for deviations.
+${DEFECT_CATALOG}
+
+### 6. REQUIRED OUTPUT FORMAT
+Return two sections separated by a blank line.
+
+**PART 1: THOUGHT PROCESS (in ROMANIAN)**
+1. **Prima impresie + Categorie:** (Furniture vs Deco).
+2. **Calcul ĂŽncredere:** Clarity, Angle, Light logic.
+3. **Scanare Defecte:** List defects with specific IDs (e.g., D07, D11). Apply "10-Second Rule".
+4. **Verificare LogicÄ:** Exclude reflections/artifacts.
+5. **Calcul Matematic:** Explicit equation: "100 - (20*1.4 + 5*1.0) = 67".
+
+**PART 2: JSON OUTPUT**
+\`\`\`json
+{
+  "isValid": true,
+  "category": "Mobilier" | "Accesorii_Deco",
+  "confidence": 95,
+  "score": 83,
+  "grade": "Very Good" | "Good" | "Average" | "Poor" | "Unacceptable",
+  "conformityPoints": ["string (RO)"],
+  "deviationsFound": [
+    {
+      "category": "Styling Textil",
+      "severity": "Medie",
+      "description": "[D07] Perne fÄrÄ volum pe canapea",
+      "location": "Central - Living",
+      "humanRule": "Regula D07 - Styling + 10s Rule",
+      "baseImpact": 12,
+      "zoneMultiplier": 1.4,
+      "finalImpact": 17,
+      "boundingBox": {
+        "x": 0.50,
+        "y": 0.50,
+        "width": 0.10,
+        "height": 0.10
+      }
+    }
+  ],
+  "scoringBreakdown": "100 - 17 = 83",
+  "recommendations": ["string (RO)"]
+}
+\`\`\`
+
+**BOUNDING BOX INSTRUCTIONS (CRITICAL):**
+- \`x, y, width, height\` are normalized (0.0 to 1.0).
+- **[0.0, 0.0] corresponds to the TOP-LEFT corner of the image.**
+- Draw the box TIGHTLY around the defect.
+- For D11 (Gap), draw the box around the *empty space*.
+
+Ready. Await image.
+`;
+
+export const buildAuditPrompt = () => CORE_PROMPT;
+
+
+---------------------------------
+### FILE: App.tsx
+---------------------------------
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { getVisualAudit } from './services/geminiService';
+import type { AuditLog, Feedback } from './types';
+import AuditLogItem from './components/AuditLogItem';
+import LoadingSpinner from './components/LoadingSpinner';
+import AuditCategoryCard from './components/AuditCategoryCard';
+import StoreSummaryCard from './components/StoreSummaryCard';
+import { ArrowLeftIcon, ChartBarIcon, CubeTransparentIcon, InformationCircleIcon, ViewColumnsIcon } from './components/icons';
+
+const AUDIT_LOGS_KEY = 'visual_audit_logs';
+const FEEDBACK_DATA_KEY = 'visual_audit_feedback';
+
+type AuditCategoryName = 'Info Point Birouri' | 'Intrare' | 'Best Seller' | 'Rafturi';
+
+const auditCategories: { name: AuditCategoryName; description: string; icon: React.FC<{className?: string}> }[] = [
+    { name: 'Info Point Birouri', description: 'AnalizÄ pentru zonele de consultanČ›Ä Č™i birouri.', icon: InformationCircleIcon },
+    { name: 'Intrare', description: 'Evaluarea primei impresii Č™i a zonelor de acces.', icon: CubeTransparentIcon },
+    { name: 'Best Seller', description: 'Verificare specialÄ pentru zonele cu produse de top.', icon: ChartBarIcon },
+    { name: 'Rafturi', description: 'AnalizÄ pentru decoraČ›iuni Č™i aranjamente pe rafturi.', icon: ViewColumnsIcon },
+];
+
+const App: React.FC = () => {
+    const [error, setError] = useState<string | null>(null);
+    
+    const [view, setView] = useState<'stores' | 'detail' | 'loading'>('stores');
+    const [activeStore, setActiveStore] = useState<'Pipera' | 'Baneasa' | null>(null);
+    const [thoughtProcessForLoading, setThoughtProcessForLoading] = useState<string | null>(null);
+    const auditResultRef = useRef<{newLog: AuditLog} | null>(null);
+
+    const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => {
+        try {
+            const savedLogs = localStorage.getItem(AUDIT_LOGS_KEY);
+            return savedLogs ? JSON.parse(savedLogs) : [];
+        } catch (e) {
+            console.error("Failed to load audit logs:", e);
+            return [];
+        }
+    });
+    
+    const [feedbackData, setFeedbackData] = useState<Map<string, Feedback>>(() => {
+        try {
+            const savedFeedback = localStorage.getItem(FEEDBACK_DATA_KEY);
+            return savedFeedback ? new Map(JSON.parse(savedFeedback)) : new Map();
+        } catch (error) {
+            console.error("Failed to load feedback from localStorage", error);
+            return new Map();
+        }
+    });
+
+    const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
+
+    useEffect(() => {
+        try {
+            // Persist logs including session-only preview URLs. They will break on reload.
+            localStorage.setItem(AUDIT_LOGS_KEY, JSON.stringify(auditLogs));
+        } catch (e) {
+            console.error("Failed to save audit logs:", e);
+        }
+    }, [auditLogs]);
+    
+    useEffect(() => {
+        try {
+            localStorage.setItem(FEEDBACK_DATA_KEY, JSON.stringify(Array.from(feedbackData.entries())));
+        } catch (error) {
+            console.error("Failed to save feedback to localStorage", error);
+        }
+    }, [feedbackData]);
+
+    const storeStats = useMemo(() => {
+        const initialData: { [key in 'Pipera' | 'Baneasa']: { scores: number[] } } = {
+            Pipera: { scores: [] },
+            Baneasa: { scores: [] },
+        };
+
+        const stats = auditLogs.reduce((acc, log) => {
+            const match = log.fileName.match(/\[(Pipera|Baneasa)\//);
+            if (match && log.result.isValid) {
+                const store = match[1] as 'Pipera' | 'Baneasa';
+                acc[store].scores.push(log.result.score);
+            }
+            return acc;
+        }, initialData);
+
+        const calculateMetrics = (scores: number[]) => {
+            if (scores.length === 0) return { avg: null, min: null, max: null, count: 0 };
+            const sum = scores.reduce((a, b) => a + b, 0);
+            return {
+                avg: Math.round(sum / scores.length),
+                min: Math.min(...scores),
+                max: Math.max(...scores),
+                count: scores.length
+            };
+        };
+
+        return {
+            Pipera: calculateMetrics(stats.Pipera.scores),
+            Baneasa: calculateMetrics(stats.Baneasa.scores),
+        };
+    }, [auditLogs]);
+
+    const handleSelectStore = (store: 'Pipera' | 'Baneasa') => {
+        setActiveStore(store);
+        setView('detail');
+    };
+
+    const handleBackToStores = () => {
+        setActiveStore(null);
+        setView('stores');
+    };
+    
+    const handleFeedbackSubmit = (feedback: Omit<Feedback, 'timestamp'>) => {
+        const newFeedback: Feedback = { ...feedback, timestamp: new Date().toISOString() };
+        setFeedbackData(prev => new Map(prev).set(feedback.auditId, newFeedback));
+    };
+    
+    const fileToBase64 = (file: File): Promise<{base64: string, mimeType: string}> => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = () => {
+                const result = (reader.result as string).split(',')[1];
+                resolve({ base64: result, mimeType: file.type });
+            };
+            reader.onerror = error => reject(error);
+        });
+    };
+
+    const handleRunAudit = useCallback(async (
+        category: AuditCategoryName,
+        mainImageFile: File,
+        mainImageUrl: string,
+        refImageFiles: File[]
+    ) => {
+        if (!activeStore) {
+            setError("Niciun magazin selectat. VÄ rugÄm sÄ vÄ Ă®ntoarceČ›i Č™i sÄ selectaČ›i un magazin.");
+            return;
+        }
+        setView('loading');
+        setError(null);
+        setThoughtProcessForLoading(null);
+        setExpandedLogId(null);
+
+        try {
+            const mainImage = await fileToBase64(mainImageFile);
+            const userReferenceImages = await Promise.all(refImageFiles.map(fileToBase64));
+            
+            const finalReferenceImages = userReferenceImages;
+            
+            const response = await getVisualAudit(mainImage.base64, mainImage.mimeType, category, finalReferenceImages);
+            
+            const newLog: AuditLog = {
+                id: `${new Date().toISOString()}-${mainImageFile.name}`,
+                timestamp: new Date().toISOString(),
+                fileName: `[${activeStore}/${category}] ${mainImageFile.name}`,
+                previewUrl: mainImageUrl,
+                thoughtProcess: response.thoughtProcess,
+                result: response.result,
+            };
+            
+            auditResultRef.current = { newLog };
+            setThoughtProcessForLoading(response.thoughtProcess);
+
+        } catch (err) {
+            console.error(err);
+            const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred during the audit.';
+             const errorLog: AuditLog = {
+                id: `${new Date().toISOString()}-${mainImageFile.name}`,
+                timestamp: new Date().toISOString(),
+                fileName: `[${activeStore}/${category}] ${mainImageFile.name}`,
+                thoughtProcess: 'Audit failed before thought process was generated.',
+                result: { isValid: false, error: errorMessage },
+                previewUrl: mainImageUrl,
+            };
+            setAuditLogs(prev => [errorLog, ...prev]);
+            setExpandedLogId(errorLog.id);
+            setError(errorMessage);
+            setView('detail');
+        }
+    }, [activeStore]);
+    
+    const handleLoadingComplete = () => {
+        if (auditResultRef.current) {
+            const { newLog } = auditResultRef.current;
+            setAuditLogs(prevLogs => [newLog, ...prevLogs]);
+            setExpandedLogId(newLog.id);
+            auditResultRef.current = null;
+        }
+        setView('detail');
+    };
+
+    const handleDeleteAudit = (logId: string) => {
+        if (window.confirm("SunteČ›i sigur cÄ doriČ›i sÄ Č™tergeČ›i acest audit? AcČ›iunea este ireversibilÄ.")) {
+            setAuditLogs(prev => prev.filter(log => log.id !== logId));
+            setFeedbackData(prev => {
+                const newMap = new Map(prev);
+                newMap.delete(logId);
+                return newMap;
+            });
+            if (expandedLogId === logId) setExpandedLogId(null);
+        }
+    };
+    
+    const WelcomeScreen: React.FC = () => (
+        <div className="text-center p-8 h-full flex flex-col justify-center items-center glass-panel rounded-xl">
+            <h2 className="text-3xl font-bold text-white mb-2">Istoric Audituri</h2>
+            <p className="text-[var(--text-secondary)] max-w-md">Aici vor apÄrea rezultatele auditurilor dupÄ ce sunt finalizate. ĂŽncepe prin a selecta o categorie Č™i a Ă®ncÄrca o imagine.</p>
+        </div>
+    );
+        
+    return (
+        <div className="min-h-screen font-sans relative">
+            {view === 'loading' && (
+                <LoadingSpinner
+                    realThoughtProcess={thoughtProcessForLoading}
+                    onAnimationComplete={handleLoadingComplete}
+                />
+            )}
+            
+            <header className="glass-panel sticky top-0 z-20">
+                <div className="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8">
+                    <h1 className="text-2xl font-bold leading-tight text-white">AI Showroom Auditor</h1>
+                </div>
+            </header>
+            <main>
+                <div className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8 space-y-8">
+                    
+                    {view === 'stores' && (
+                        <section>
+                            <h2 className="text-3xl font-bold text-center mb-6 text-white">SelecteazÄ Magazinul</h2>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                <StoreSummaryCard 
+                                    storeName="Pipera" 
+                                    stats={storeStats.Pipera} 
+                                    onSelectStore={() => handleSelectStore('Pipera')}
+                                />
+                                <StoreSummaryCard 
+                                    storeName="Baneasa" 
+                                    stats={storeStats.Baneasa} 
+                                    onSelectStore={() => handleSelectStore('Baneasa')}
+                                />
+                            </div>
+                        </section>
+                    )}
+
+                    {view === 'detail' && activeStore && (
+                        <section>
+                            <div className="mb-6">
+                                <button onClick={handleBackToStores} className="flex items-center gap-2 text-sm font-semibold text-[var(--text-secondary)] hover:text-white transition-colors">
+                                    <ArrowLeftIcon className="w-5 h-5" />
+                                    ĂŽnapoi la Magazine
+                                </button>
+                                <h2 className="text-3xl font-bold text-center -mt-6 text-white">Audit Mobexpert {activeStore}</h2>
+                            </div>
+                            
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6">
+                                {auditCategories.map(cat => (
+                                    <AuditCategoryCard 
+                                        key={`${activeStore}-${cat.name}`}
+                                        category={cat.name}
+                                        description={cat.description}
+                                        icon={cat.icon}
+                                        onRunAudit={handleRunAudit}
+                                    />
+                                ))}
+                            </div>
+                        </section>
+                    )}
+                    
+                    <section className="pt-4">
+                        {error && (
+                            <div className="glass-panel border-l-4 border-[var(--accent-red)] text-[var(--text-primary)] p-4 rounded-lg mb-4" role="alert">
+                                <p className="font-bold">Error</p>
+                                <p>{error}</p>
+                            </div>
+                        )}
+                        
+                        {auditLogs.length > 0 ? (
+                            <div className="space-y-4">
+                                <h3 className="text-xl font-bold text-white px-2">Istoric Audituri General</h3>
+                                {auditLogs.map(log => (
+                                    <AuditLogItem 
+                                        key={log.id}
+                                        log={log}
+                                        isExpanded={expandedLogId === log.id}
+                                        onToggleExpand={() => setExpandedLogId(expandedLogId === log.id ? null : log.id)}
+                                        onDeleteAudit={() => handleDeleteAudit(log.id)}
+                                        feedback={feedbackData.get(log.id)}
+                                        onFeedbackSubmit={handleFeedbackSubmit}
+                                    />
+                                ))}
+                            </div>
+                        ) : <WelcomeScreen />}
+                    </section>
+                </div>
+            </main>
+        </div>
+    );
+};
+
+export default App;
+
+
+---------------------------------
+### FILE: index.tsx
+---------------------------------
+
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App';
+
+const rootElement = document.getElementById('root');
+if (!rootElement) {
+  throw new Error("Could not find root element to mount to");
+}
+
+const root = ReactDOM.createRoot(rootElement);
+root.render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+
+
+---------------------------------
+### FILE: principles.ts
+---------------------------------
+// File removed
+
+
+---------------------------------
+### FILE: types.ts
+---------------------------------
+export interface BoundingBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface Deviation {
+  category: string;
+  severity: string;
+  description: string;
+  location: string;
+  humanRule: string;
+  baseImpact: number;
+  zoneMultiplier: number;
+  finalImpact: number;
+  boundingBox?: BoundingBox;
+}
+
+export interface AuditReport {
+  isValid: true;
+  category: string;
+  confidence: number;
+  score: number;
+  grade: string;
+  conformityPoints: string[];
+  deviationsFound: Deviation[];
+  scoringBreakdown: string;
+  recommendations: string[];
+}
+
+export interface Feedback {
+  auditId: string;
+  validation: 'correct' | 'incorrect';
+  comment?: string;
+  timestamp: string;
+}
+
+export interface AuditLog {
+  id: string;
+  timestamp: string;
+  fileName: string;
+  previewUrl: string;
+  thoughtProcess: string;
+  result: AuditReport | { isValid: false; error: string };
+}
+
+
+---------------------------------
+### FILE: vite.config.ts
+---------------------------------
+import path from 'path';
+import { defineConfig, loadEnv } from 'vite';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig(({ mode }) => {
+    const env = loadEnv(mode, '.', '');
+    return {
+      server: {
+        port: 3000,
+        host: '0.0.0.0',
+      },
+      plugins: [react()],
+      define: {
+        'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
+      },
+      resolve: {
+        alias: {
+          '@': path.resolve(__dirname, '.'),
+        }
+      }
+    };
+});

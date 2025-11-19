@@ -1,0 +1,7 @@
+{
+  "name": "Visual Showroom Auditor",
+  "description": "An AI-powered application that visually inspects showroom images to audit for compliance with presentation standards. It identifies deviations, provides a detailed score, and offers recommendations for improvement using Gemini.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

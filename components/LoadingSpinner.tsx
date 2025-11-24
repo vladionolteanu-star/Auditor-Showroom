@@ -77,16 +77,16 @@ const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({ realThoughtProcess, onA
         currentLineIdx++;
 
         // VITEZA DE CITIRE (Mai lentă, să pară că "citește")
-        let delay = 250;
-        if (lineContent.trim().length > 60) delay = 350; // Linii lungi
-        if (lineContent.trim().length === 0) delay = 120;  // Linii goale
+        let delay = 80;
+        if (lineContent.trim().length > 60) delay = 150; // Linii lungi
+        if (lineContent.trim().length === 0) delay = 40;  // Linii goale
 
         const timer = setTimeout(scanNextLine, delay);
         timersRef.current.push(timer as any);
       }
       else {
         // S-a terminat fișierul curent. Trecem la următorul.
-        const nextFileIdx = (currentFileIdx + 1) % projectFiles.length; // Loop doar dacă termină tot
+        const nextFileIdx = (currentFileIdx + 1) % projectFiles.length; // Loop doar dacă terminate tot
 
         currentFileIdx = nextFileIdx;
         currentLineIdx = 0;
@@ -179,7 +179,7 @@ const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({ realThoughtProcess, onA
           setTimeout(() => {
             setIsFadingOut(true);
             setTimeout(onAnimationComplete, 1000); // Timp pentru fade-out
-          }, 5000);
+          }, 2500);
           return;
         }
 
@@ -201,8 +201,8 @@ const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({ realThoughtProcess, onA
 
         // Viteză de scriere variabilă (naturală)
         // Mai rapidă decât citirea, că e output generat
-        let typeDelay = 300;
-        if (lines[lineIdx - 1].length > 80) typeDelay = 450; if (lines[lineIdx - 1].trim().length === 0) typeDelay = 150;
+        let typeDelay = 30;
+        if (lines[lineIdx - 1].length > 80) typeDelay = 50;
 
         const timer = setTimeout(typeWriterLoop, typeDelay);
         timersRef.current.push(timer as any);
@@ -220,10 +220,10 @@ const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({ realThoughtProcess, onA
   // ============================================================
   const currentFile = projectFiles[activeFile] || { path: '', content: '', language: '' };
 
-  // Afișăm liniile care au fost "scrise" deja în modul revealing
-  // În loc să afișăm doar linia curentă, afișăm ultimele 10 linii pentru context
+  // Afișăm doar liniile care au fost "scrise" deja în modul revealing
+  // Sau toate liniile în modul scanning
   const visibleLines = animationStateRef.current === 'revealing'
-    ? currentFile.content.split('\n').slice(0, Math.max(1, highlightedLine + 1))
+    ? currentFile.content.split('\n').slice(0, highlightedLine + 1)
     : currentFile.content.split('\n');
 
   const highlightToken = (line: string) => {
@@ -355,4 +355,3 @@ const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({ realThoughtProcess, onA
 };
 
 export default LoadingSpinner;
-

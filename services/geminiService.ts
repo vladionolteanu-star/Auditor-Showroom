@@ -2,6 +2,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import type { AuditReport, AIInventory, VisualDeviation } from '../types';
 import { buildAuditPrompt } from './prompt';
 import { calculateScore } from './scoringEngine';
+import { validateAIResponse, sanitizeAIResponse } from './aiValidator';
 
 const REFERENCE_IMAGE_INSTRUCTION = `
 ## IMAGINI DE REFERINȚĂ
@@ -45,8 +46,17 @@ export const getVisualAudit = async (
     referenceImages: { base64: string, mimeType: string }[]
 ): Promise<{ thoughtProcess: string; result: AuditReport; }> => {
 
-    // Păstrăm modelul Gemini 3 Pro Preview
-    const model = genAI.getGenerativeModel({ model: "gemini-3-pro-preview" });
+    // Gemini 2.5 Pro (stable) - cel mai bun pentru visual accuracy
+    // Cu setări de determinism maxim pentru rezultate consistente
+    const model = genAI.getGenerativeModel({
+        model: "gemini-pro-latest",
+        generationConfig: {
+            temperature: 0.1,      // Determinism maxim (0.0-1.0, default ~0.9)
+            topK: 1,               // Consideră doar top 1 token la fiecare pas
+            topP: 0.1,             // Nucleu restrâns de probabilități
+            candidateCount: 1,     // O singură variantă de răspuns
+        }
+    });
 
     const auditPrompt = buildAuditPrompt();
     const mainImagePart = fileToGenerativePart(imageBase64, mimeType);
@@ -84,32 +94,49 @@ export const getVisualAudit = async (
             recommendationsCount: rawData.recommendations?.length || 0
         });
 
+        // --- VALIDARE ȘI SANITIZARE (NOU!) ---
+        console.log('[AUDIT] Validating AI response...');
+        const validation = validateAIResponse(rawData);
+
+        if (!validation.isValid) {
+            console.error('[AUDIT] Validation failed:', validation.errors);
+            throw new Error(`AI response validation failed: ${validation.errors.join(', ')}`);
+        }
+
+        if (validation.warnings.length > 0) {
+            console.warn('[AUDIT] Validation warnings:', validation.warnings);
+        }
+
+        // Sanitizăm datele pentru a corecta erori minore
+        const sanitizedData = sanitizeAIResponse(rawData);
+        console.log('[AUDIT] Response validated and sanitized successfully');
+
         // Verificăm dacă avem deviații cu bounding boxes
-        if (rawData.raw_deviations) {
-            const deviationsWithBoxes = rawData.raw_deviations.filter(d => d.boundingBox);
+        if (sanitizedData.raw_deviations) {
+            const deviationsWithBoxes = sanitizedData.raw_deviations.filter(d => d.boundingBox);
             console.log('[AUDIT] Deviations with bounding boxes:', deviationsWithBoxes.length);
             if (deviationsWithBoxes.length > 0) {
                 console.log('[AUDIT] Sample bounding box:', deviationsWithBoxes[0].boundingBox);
             }
         }
 
-        // --- CALCUL SCOR ---
-        const computation = calculateScore(rawData.inventory);
+        // --- CALCUL SCOR (pe date sanitizate) ---
+        const computation = calculateScore(sanitizedData.inventory);
         console.log('[AUDIT] Score computed:', computation);
 
-        // --- ETRAGERE THOUGHT PROCESS ---
+        // --- EXTRAGERE THOUGHT PROCESS ---
         // Dacă există _reasoning în JSON, îl folosim. Altfel fallback.
-        const thoughtProcess = rawData._reasoning
-            ? rawData._reasoning
+        const thoughtProcess = sanitizedData._reasoning
+            ? sanitizedData._reasoning
             : "Analiză directă (fără reasoning detaliat).";
 
         const finalReport: AuditReport = {
             isValid: true,
             category: category,
-            inventory: rawData.inventory,
-            raw_deviations: rawData.raw_deviations,
+            inventory: sanitizedData.inventory,
+            raw_deviations: sanitizedData.raw_deviations,
             computation: computation,
-            recommendations: rawData.recommendations
+            recommendations: sanitizedData.recommendations
         };
 
         console.log('[AUDIT] Final report created successfully');

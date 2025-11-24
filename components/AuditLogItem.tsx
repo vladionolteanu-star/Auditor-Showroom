@@ -1,9 +1,10 @@
 // Importuri React și hooks
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 // Importuri tipuri și componente
-import { AuditLog, AuditReport, Feedback, BoundingBox } from '../types';
-import { TrashIcon, ArrowDownTrayIcon } from './icons';
+import { AuditLog, AuditReport, Feedback, BoundingBox, AIFixedImageResult } from '../types';
+import { TrashIcon, ArrowDownTrayIcon, SparklesIcon } from './icons';
 import AuditResultDisplay from './AuditResultDisplay';
+import { generateFixedImage } from '../services/imageFixService';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 
@@ -172,6 +173,9 @@ const AuditLogItem: React.FC<AuditLogItemProps> = ({
   const imageRef = useRef<HTMLImageElement>(null);
   const [debugMode, setDebugMode] = useState(false);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+  const [isFixingImage, setIsFixingImage] = useState(false);
+  const [fixedImageResult, setFixedImageResult] = useState<AIFixedImageResult | null>(null);
+  const [showFixedImageModal, setShowFixedImageModal] = useState(false);
 
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
@@ -344,10 +348,11 @@ const AuditLogItem: React.FC<AuditLogItemProps> = ({
 
         const pixelBox = boundingBoxToPixels(dev.boundingBox!, imageState.displayWidth, imageState.displayHeight);
 
-        const labelR = 20; // Mărit de la 13 la 20 pentru vizibilitate
+        const labelR = 22; // Mărit pentru vizibilitate
+        // FIX: Poziționăm label-ul în CENTRUL bounding box-ului
         const labelPos = {
-          x: pixelBox.x + pixelBox.width + labelR * 0.4,
-          y: pixelBox.y - labelR * 0.4
+          x: pixelBox.x + pixelBox.width / 2,  // Centru X
+          y: pixelBox.y + pixelBox.height / 2  // Centru Y
         };
         const labelCirclePath = generateOrganicCirclePath(labelPos.x, labelPos.y, labelR, index);
         const labelRotation = (Math.sin(index * 2.5) * 43758.5) % 15 - 7.5;
@@ -606,6 +611,106 @@ const AuditLogItem: React.FC<AuditLogItemProps> = ({
                   </svg>
                 )}
               </div>
+
+              {/* AI Fix Button */}
+              {originalReport && originalReport.raw_deviations.some(d => d.boundingBox) && (
+                <div className="mt-4 flex justify-center">
+                  <button
+                    onClick={async () => {
+                      if (!imageRef.current || isFixingImage) return;
+                      setIsFixingImage(true);
+                      setFixedImageResult(null);
+
+                      try {
+                        // Get original image data
+                        const imgElement = imageRef.current;
+                        const canvas = document.createElement('canvas');
+                        canvas.width = imgElement.naturalWidth;
+                        canvas.height = imgElement.naturalHeight;
+                        const ctx = canvas.getContext('2d');
+                        if (!ctx) throw new Error('Canvas context not available');
+                        ctx.drawImage(imgElement, 0, 0);
+                        const originalImageBase64 = canvas.toDataURL('image/png').split(',')[1];
+
+                        const result = await generateFixedImage(
+                          originalImageBase64,
+                          'image/png',
+                          originalReport.raw_deviations,
+                          imgElement.naturalWidth,
+                          imgElement.naturalHeight
+                        );
+
+                        setFixedImageResult(result);
+                        if (result.success) {
+                          setShowFixedImageModal(true);
+                        }
+                      } catch (error) {
+                        console.error('Failed to generate fixed image:', error);
+                        setFixedImageResult({
+                          success: false,
+                          error: error instanceof Error ? error.message : 'Unknown error'
+                        });
+                      } finally {
+                        setIsFixingImage(false);
+                      }
+                    }}
+                    disabled={isFixingImage}
+                    className="group flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 transition-all duration-300 shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <SparklesIcon className="w-5 h-5 text-white group-hover:scale-110 transition-transform" />
+                    <span className="text-white font-semibold">
+                      {isFixingImage ? 'Generating AI Fix...' : 'Fix It with AI'}
+                    </span>
+                  </button>
+                </div>
+              )}
+
+              {/* AI Fix Result Modal */}
+              {showFixedImageModal && fixedImageResult?.success && (
+                <div
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+                  onClick={() => setShowFixedImageModal(false)}
+                >
+                  <div
+                    className="relative bg-[#1a1a1a] rounded-2xl p-6 max-w-6xl w-full max-h-[90vh] overflow-auto"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      onClick={() => setShowFixedImageModal(false)}
+                      className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 transition-colors"
+                    >
+                      <span className="text-white text-xl">×</span>
+                    </button>
+
+                    <h3 className="text-2xl font-bold text-white mb-6 flex items-center gap-2">
+                      <SparklesIcon className="w-6 h-6 text-purple-400" />
+                      AI-Fixed Image
+                    </h3>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <h4 className="text-sm font-semibold text-gray-400 mb-2 uppercase tracking-wider">Original</h4>
+                        <img src={log.previewUrl} alt="Original" className="w-full rounded-lg border-2 border-gray-700" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-semibold text-purple-400 mb-2 uppercase tracking-wider">AI-Fixed</h4>
+                        <img src={fixedImageResult.fixedImageUrl} alt="AI Fixed" className="w-full rounded-lg border-2 border-purple-500" />
+                      </div>
+                    </div>
+
+                    <div className="mt-4 text-sm text-gray-400 text-center">
+                      Processing time: {fixedImageResult.processingTimeMs}ms
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* AI Fix Error */}
+              {fixedImageResult && !fixedImageResult.success && (
+                <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-sm">
+                  <strong>AI Fix Failed:</strong> {fixedImageResult.error}
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">

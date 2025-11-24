@@ -5,6 +5,7 @@ import AuditLogItem from './components/AuditLogItem';
 import LoadingSpinner from './components/LoadingSpinner';
 import AuditCategoryCard from './components/AuditCategoryCard';
 import StoreSummaryCard from './components/StoreSummaryCard';
+import VideoRecorder from './components/VideoRecorder';
 import { ArrowLeftIcon, ChartBarIcon, CubeTransparentIcon, InformationCircleIcon, ViewColumnsIcon } from './components/icons';
 
 const AUDIT_LOGS_KEY = 'visual_audit_logs';
@@ -12,7 +13,7 @@ const FEEDBACK_DATA_KEY = 'visual_audit_feedback';
 
 type AuditCategoryName = 'Info Point Birouri' | 'Intrare' | 'Best Seller' | 'Rafturi';
 
-const auditCategories: { name: AuditCategoryName; description: string; icon: React.FC<{className?: string}> }[] = [
+const auditCategories: { name: AuditCategoryName; description: string; icon: React.FC<{ className?: string }> }[] = [
     { name: 'Info Point Birouri', description: 'Analiză pentru zonele de consultanță și birouri.', icon: InformationCircleIcon },
     { name: 'Intrare', description: 'Evaluarea primei impresii și a zonelor de acces.', icon: CubeTransparentIcon },
     { name: 'Best Seller', description: 'Verificare specială pentru zonele cu produse de top.', icon: ChartBarIcon },
@@ -23,13 +24,13 @@ const App: React.FC = () => {
     const [error, setError] = useState<string | null>(null);
     const [view, setView] = useState<'stores' | 'detail' | 'loading'>('stores');
     const [activeStore, setActiveStore] = useState<'Pipera' | 'Baneasa' | null>(null);
-    
+
     // TAB STATE
     const [activeCategory, setActiveCategory] = useState<AuditCategoryName>('Intrare');
-    
+
     const [thoughtProcessForLoading, setThoughtProcessForLoading] = useState<string | null>(null);
-    const auditResultRef = useRef<{newLog: AuditLog} | null>(null);
-    
+    const auditResultRef = useRef<{ newLog: AuditLog } | null>(null);
+
     // Ref pentru Auto-Scroll la rezultatul nou
     const latestLogRef = useRef<HTMLDivElement>(null);
 
@@ -62,7 +63,7 @@ const App: React.FC = () => {
         const stats = auditLogs.reduce((acc, log) => {
             const match = log.fileName.match(/\[(Pipera|Baneasa)\//);
             if (match && log.result.isValid) {
-                acc[match[1] as 'Pipera'|'Baneasa'].scores.push(log.result.score);
+                acc[match[1] as 'Pipera' | 'Baneasa'].scores.push(log.result.score);
             }
             return acc;
         }, initialData);
@@ -82,7 +83,7 @@ const App: React.FC = () => {
         setFeedbackData(prev => new Map(prev).set(feedback.auditId, { ...feedback, timestamp: new Date().toISOString() }));
     };
 
-    const fileToBase64 = (file: File): Promise<{base64: string, mimeType: string}> => {
+    const fileToBase64 = (file: File): Promise<{ base64: string, mimeType: string }> => {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.readAsDataURL(file);
@@ -98,7 +99,7 @@ const App: React.FC = () => {
             const mainImg = await fileToBase64(main);
             const refImgs = await Promise.all(refs.map(fileToBase64));
             const response = await getVisualAudit(mainImg.base64, mainImg.mimeType, cat, refImgs);
-            
+
             const newLog: AuditLog = {
                 id: `${new Date().toISOString()}-${main.name}`,
                 timestamp: new Date().toISOString(),
@@ -128,7 +129,7 @@ const App: React.FC = () => {
     // --- FIX CRITIC PENTRU CRASH ---
     const handleLoadingComplete = useCallback(() => {
         const result = auditResultRef.current;
-        
+
         // 1. Verificăm dacă avem un rezultat valid ÎNAINTE să accesăm proprietăți
         if (result && result.newLog) {
             const { newLog } = result;
@@ -142,11 +143,11 @@ const App: React.FC = () => {
             });
 
             setExpandedLogId(newLog.id);
-            
+
             // 3. Golim ref-ul ca să nu fie procesat din nou
             auditResultRef.current = null;
         }
-        
+
         // Trecem înapoi la view, indiferent dacă a fost succes sau nu
         setView('detail');
     }, []);
@@ -158,7 +159,7 @@ const App: React.FC = () => {
         }
     };
 
-    const TabButton: React.FC<{cat: typeof auditCategories[0]}> = ({ cat }) => {
+    const TabButton: React.FC<{ cat: typeof auditCategories[0] }> = ({ cat }) => {
         const isActive = activeCategory === cat.name;
         return (
             <button
@@ -181,9 +182,9 @@ const App: React.FC = () => {
     return (
         <div className="min-h-screen font-sans text-text-primary relative selection:bg-accent-DEFAULT/30">
             <div className="grain" />
-            
+
             {view === 'loading' && <LoadingSpinner realThoughtProcess={thoughtProcessForLoading} onAnimationComplete={handleLoadingComplete} />}
-            
+
             <header className="sticky top-0 z-40 w-full border-b border-white/5 bg-[#0a0a0a]/70 backdrop-blur-xl">
                 <div className="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-4">
                     <div className="flex items-center gap-3">
@@ -194,18 +195,21 @@ const App: React.FC = () => {
                             Mobexpert AI Auditor
                         </h1>
                     </div>
-                    {activeStore && (
-                         <div className="flex items-center gap-3 bg-bg-card/50 border border-border px-3 py-1.5 rounded-full">
-                             <div className="w-2 h-2 rounded-full bg-accent-green animate-pulse"></div>
-                             <span className="text-xs font-mono text-text-secondary uppercase tracking-widest">Locație: <span className="text-white font-bold">{activeStore}</span></span>
-                         </div>
-                    )}
+                    <div className="flex items-center gap-3">
+                        <VideoRecorder />
+                        {activeStore && (
+                            <div className="flex items-center gap-3 bg-bg-card/50 border border-border px-3 py-1.5 rounded-full">
+                                <div className="w-2 h-2 rounded-full bg-accent-green animate-pulse"></div>
+                                <span className="text-xs font-mono text-text-secondary uppercase tracking-widest">Locație: <span className="text-white font-bold">{activeStore}</span></span>
+                            </div>
+                        )}
+                    </div>
                 </div>
             </header>
 
             <main className="relative z-10 pb-20 mt-8">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-10">
-                    
+
                     {view === 'stores' && (
                         <section className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                             <div className="text-center mb-12">
@@ -229,14 +233,14 @@ const App: React.FC = () => {
                                     <ArrowLeftIcon className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
                                     Înapoi la Magazine
                                 </button>
-                                
+
                                 {/* TAB NAVIGATION - SLEEK */}
                                 <div className="flex flex-nowrap overflow-x-auto border-b border-white/10 mb-6 scrollbar-hide">
                                     {auditCategories.map(cat => <TabButton key={cat.name} cat={cat} />)}
                                 </div>
 
                                 {/* ACTIVE CATEGORY CARD */}
-                                <AuditCategoryCard 
+                                <AuditCategoryCard
                                     key={`${activeStore}-${activeCategory}`}
                                     category={activeCategory}
                                     description={auditCategories.find(c => c.name === activeCategory)?.description || ''}
@@ -246,7 +250,7 @@ const App: React.FC = () => {
                             </div>
                         </section>
                     )}
-                    
+
                     <section className="pt-4 animate-in fade-in delay-150 duration-700">
                         {error && (
                             <div className="bg-status-danger/10 border border-status-danger/30 text-status-danger p-4 rounded-xl mb-6">
@@ -262,7 +266,7 @@ const App: React.FC = () => {
                                     {auditLogs.map((log, index) => (
                                         // REF-ul pentru Auto-Scroll este pus DOAR pe primul element
                                         <div key={log.id} ref={index === 0 ? latestLogRef : null}>
-                                            <AuditLogItem 
+                                            <AuditLogItem
                                                 log={log} isExpanded={expandedLogId === log.id}
                                                 onToggleExpand={() => setExpandedLogId(expandedLogId === log.id ? null : log.id)}
                                                 onDeleteAudit={() => handleDeleteAudit(log.id)}

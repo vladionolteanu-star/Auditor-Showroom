@@ -65,3 +65,11 @@ export interface AuditLog {
     thoughtProcess: string;
     result: AuditReport | { isValid: false; error: string };
 }
+
+export interface AIFixedImageResult {
+    success: boolean;
+    fixedImageBase64?: string;
+    fixedImageUrl?: string;
+    error?: string;
+    processingTimeMs?: number;
+}

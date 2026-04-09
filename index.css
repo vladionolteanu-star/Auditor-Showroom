@@ -78,3 +78,19 @@ body::before {
 ::-webkit-scrollbar-track { background: #0a0a0a; }
 ::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: #404040; }
+
+/* CV scanning beam animation */
+.scan-beam {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent 0%, rgba(56, 232, 255, 0.4) 20%, rgba(56, 232, 255, 0.8) 50%, rgba(56, 232, 255, 0.4) 80%, transparent 100%);
+    box-shadow: 0 0 15px rgba(56, 232, 255, 0.3), 0 0 30px rgba(56, 232, 255, 0.15);
+    animation: scanDown 3s linear infinite;
+}
+
+@keyframes scanDown {
+    0% { top: -2px; }
+    100% { top: 100%; }
+}

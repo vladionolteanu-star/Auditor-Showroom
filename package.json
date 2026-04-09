@@ -6,11 +6,18 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "eval": "tsx eval/run-eval.ts",
+    "eval:fp": "tsx eval/run-eval.ts --fp-only",
+    "eval:tp": "tsx eval/run-eval.ts --tp-only",
+    "eval:offline": "tsx eval/run-eval.ts --scoring-only",
+    "eval:dry": "tsx eval/run-eval.ts --dry-run"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.69.0",
     "@google/generative-ai": "^0.24.1",
+    "@tensorflow-models/coco-ssd": "^2.2.3",
+    "@tensorflow/tfjs": "^4.22.0",
     "html2canvas": "^1.4.1",
     "jspdf": "^2.5.1",
     "react": "^19.2.0",
@@ -19,6 +26,7 @@
   "devDependencies": {
     "@types/node": "^22.19.1",
     "@vitejs/plugin-react": "^5.0.0",
+    "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
   }

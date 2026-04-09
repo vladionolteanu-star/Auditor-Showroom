@@ -1,20 +1,20 @@
 import React, { useState, useRef, useEffect } from 'react';
-import type { Deviation } from '../types';
+import type { WorkspaceViolation } from '../types';
 
 interface ImageViewerProps {
   imageUrl: string;
-  deviations: Deviation[];
+  deviations: WorkspaceViolation[];
   activeDeviationIndex: number | null;
 }
 
 // FIX: Expanded color map to cover all severity levels and ensure consistency with AuditResultDisplay.
 const SEVERITY_COLORS: Record<string, string> = {
-    'CRITICĂ': 'rgba(220, 38, 38, 0.7)',   // red-600
-    'Mare': 'rgba(236, 72, 153, 0.7)',    // pink-500
-    'Medie': 'rgba(234, 179, 8, 0.7)',    // yellow-500
-    'Mică': 'rgba(59, 130, 246, 0.7)',     // blue-500
-    'Notă': 'rgba(107, 114, 128, 0.7)',   // gray-500
-    'default': 'rgba(107, 114, 128, 0.7)', // fallback gray
+  'CRITICĂ': 'rgba(220, 38, 38, 0.7)',   // red-600
+  'Mare': 'rgba(236, 72, 153, 0.7)',    // pink-500
+  'Medie': 'rgba(234, 179, 8, 0.7)',    // yellow-500
+  'Mică': 'rgba(59, 130, 246, 0.7)',     // blue-500
+  'Notă': 'rgba(107, 114, 128, 0.7)',   // gray-500
+  'default': 'rgba(107, 114, 128, 0.7)', // fallback gray
 };
 
 export const ImageViewer: React.FC<ImageViewerProps> = ({ imageUrl, deviations, activeDeviationIndex }) => {
@@ -54,12 +54,12 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({ imageUrl, deviations, 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    
+
     const resizeObserver = new ResizeObserver(() => {
       // We delay the update slightly to ensure the browser has finished layout calculations.
       requestAnimationFrame(updateImageSize);
     });
-    
+
     resizeObserver.observe(container);
     return () => resizeObserver.disconnect();
   }, []);
@@ -86,19 +86,19 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({ imageUrl, deviations, 
           >
             {deviations.map((dev, index) => (
               dev.boundingBox && (
-                  <rect
-                      key={index}
-                      x={dev.boundingBox.x * imageSize.width}
-                      y={dev.boundingBox.y * imageSize.height}
-                      width={dev.boundingBox.width * imageSize.width}
-                      height={dev.boundingBox.height * imageSize.height}
-                      className={`transition-all duration-300 ease-in-out stroke-white`}
-                      fill={SEVERITY_COLORS[dev.severity] || SEVERITY_COLORS.default}
-                      strokeWidth={activeDeviationIndex === index ? 4 : 2}
-                      style={{
-                          opacity: activeDeviationIndex === null || activeDeviationIndex === index ? 1 : 0.2,
-                      }}
-                  />
+                <rect
+                  key={index}
+                  x={dev.boundingBox.x * imageSize.width}
+                  y={dev.boundingBox.y * imageSize.height}
+                  width={dev.boundingBox.width * imageSize.width}
+                  height={dev.boundingBox.height * imageSize.height}
+                  className={`transition-all duration-300 ease-in-out stroke-white`}
+                  fill={SEVERITY_COLORS[dev.severity] || SEVERITY_COLORS.default}
+                  strokeWidth={activeDeviationIndex === index ? 4 : 2}
+                  style={{
+                    opacity: activeDeviationIndex === null || activeDeviationIndex === index ? 1 : 0.2,
+                  }}
+                />
               )
             ))}
           </svg>

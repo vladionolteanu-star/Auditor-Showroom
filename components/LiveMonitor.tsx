@@ -5,8 +5,7 @@ import { useMediaPipeDetection, type TrackedObject } from '../hooks/useMediaPipe
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const GEMINI_INTERVAL_MS = 30_000;
-const GEMINI_INITIAL_DELAY_MS = 5_000;
+// Auto-scan eliminat (la cerere apasare buton)
 
 const OBJECT_COLORS: Record<string, string> = {
     person: '#06b6d4',
@@ -103,7 +102,8 @@ function CVBox({ obj, vr }: CVBoxProps) {
     const bh = obj.bbox.height * vr.height;
 
     const color = getObjectColor(obj.label);
-    const opacity = Math.min(1, obj.confidence) * (obj.framesMissing > 0 ? 0.4 : 0.85);
+    const opacity = Math.min(1, obj.confidence) * (obj.framesMissing > 0 ? 0.6 : 1);
+    const strokeW = 2.5;
     const arm = Math.max(Math.min(bw, bh) * 0.2, 6);
     const labelText = `${obj.label} ${Math.round(obj.confidence * 100)}%`;
     const labelW = labelText.length * 5.8 + 12;
@@ -116,17 +116,17 @@ function CVBox({ obj, vr }: CVBoxProps) {
 
             {/* Corner brackets */}
             <path d={`M${bx},${by + arm} L${bx},${by} L${bx + arm},${by}`}
-                fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" />
+                fill="none" stroke={color} strokeWidth={strokeW} strokeLinecap="round" />
             <path d={`M${bx + bw - arm},${by} L${bx + bw},${by} L${bx + bw},${by + arm}`}
-                fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" />
+                fill="none" stroke={color} strokeWidth={strokeW} strokeLinecap="round" />
             <path d={`M${bx},${by + bh - arm} L${bx},${by + bh} L${bx + arm},${by + bh}`}
-                fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" />
+                fill="none" stroke={color} strokeWidth={strokeW} strokeLinecap="round" />
             <path d={`M${bx + bw - arm},${by + bh} L${bx + bw},${by + bh} L${bx + bw},${by + bh - arm}`}
-                fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" />
+                fill="none" stroke={color} strokeWidth={strokeW} strokeLinecap="round" />
 
             {/* Label pill */}
-            <rect x={bx} y={labelY} width={labelW} height={17} rx={3} fill={color} opacity={0.8} />
-            <text x={bx + 6} y={labelY + 12} fill="white" fontSize="9" fontFamily="Inter, sans-serif" fontWeight="600">
+            <rect x={bx} y={labelY} width={labelW} height={19} rx={3} fill={color} opacity={0.9} />
+            <text x={bx + 6} y={labelY + 13} fill="white" fontSize="10" fontFamily="Inter, sans-serif" fontWeight="700">
                 {labelText}
             </text>
         </g>
@@ -171,7 +171,6 @@ function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const streamRef = useRef<MediaStream | null>(null);
-    const geminiTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const isMountedRef = useRef(true);
 
     const [isStreaming, setIsStreaming] = useState(false);
@@ -182,7 +181,6 @@ function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
     const [violations, setViolations] = useState<WorkspaceViolation[]>([]);
     const [recommendations, setRecommendations] = useState<string[]>([]);
     const [isScanning, setIsScanning] = useState(false);
-    const [countdown, setCountdown] = useState<number | null>(null);
     const [scanCount, setScanCount] = useState(0);
     const [lastError, setLastError] = useState<string | null>(null);
     const [showViolationPanel, setShowViolationPanel] = useState(false);
@@ -287,7 +285,6 @@ function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
         const base64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1] ?? '';
 
         setIsScanning(true);
-        setCountdown(null);
         setLastError(null);
 
         const cvContext = buildDetectedObjectsSummary();
@@ -318,47 +315,7 @@ function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
     const captureRef = useRef(captureAndAnalyze);
     captureRef.current = captureAndAnalyze;
 
-    // ── Gemini periodic loop ───────────────────────────────────────────────
-    useEffect(() => {
-        if (!isStreaming) return;
-
-        let active = true;
-        let countdownInterval: ReturnType<typeof setInterval> | null = null;
-
-        const scheduleNext = (delayMs: number) => {
-            // Clear any previous timer to prevent stale handle leaks
-            if (geminiTimerRef.current) clearTimeout(geminiTimerRef.current);
-            if (countdownInterval) clearInterval(countdownInterval);
-
-            let remaining = Math.ceil(delayMs / 1000);
-            setCountdown(remaining);
-
-            countdownInterval = setInterval(() => {
-                remaining -= 1;
-                if (remaining <= 0) {
-                    if (countdownInterval) clearInterval(countdownInterval);
-                    setCountdown(null);
-                } else {
-                    setCountdown(remaining);
-                }
-            }, 1000);
-
-            geminiTimerRef.current = setTimeout(async () => {
-                if (countdownInterval) clearInterval(countdownInterval);
-                if (!active) return;
-                await captureRef.current();
-                if (active) scheduleNext(GEMINI_INTERVAL_MS);
-            }, delayMs);
-        };
-
-        scheduleNext(GEMINI_INITIAL_DELAY_MS);
-
-        return () => {
-            active = false;
-            if (geminiTimerRef.current) clearTimeout(geminiTimerRef.current);
-            if (countdownInterval) clearInterval(countdownInterval);
-        };
-    }, [isStreaming]);
+    // Auto-scan Gemini a fost eliminat pentru control complet manual din UX.
 
     // ── Reset on zone change ───────────────────────────────────────────────
     useEffect(() => {
@@ -513,17 +470,12 @@ function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
                                         {isScanning ? (
                                             <>
                                                 <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-                                                <span className="text-[10px] text-amber-300">AI...</span>
-                                            </>
-                                        ) : countdown !== null ? (
-                                            <>
-                                                <div className="w-1.5 h-1.5 rounded-full bg-white/30" />
-                                                <span className="text-[10px] text-white/40 font-mono">{countdown}s</span>
+                                                <span className="text-[10px] text-amber-300">Scanare AI...</span>
                                             </>
                                         ) : (
                                             <>
-                                                <div className="w-1.5 h-1.5 rounded-full bg-green-400" />
-                                                <span className="text-[10px] text-green-300">Live</span>
+                                                <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                                                <span className="text-[10px] text-green-400">AI Pregătit</span>
                                             </>
                                         )}
                                     </div>

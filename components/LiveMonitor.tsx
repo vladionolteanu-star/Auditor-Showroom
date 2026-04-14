@@ -1,7 +1,8 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
-import type { ZoneType, WorkspaceViolation, CalculatedScore } from '../types';
-import { getVisualAudit } from '../services/geminiService';
+import type { ZoneType, WorkspaceViolation, CalculatedScore, ComplianceReport } from '../types';
 import { useMediaPipeDetection, type TrackedObject } from '../hooks/useMediaPipeDetection';
+
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -103,18 +104,22 @@ function CVBox({ obj, vr }: CVBoxProps) {
 
     const color = getObjectColor(obj.label);
     const opacity = Math.min(1, obj.confidence) * (obj.framesMissing > 0 ? 0.6 : 1);
-    const strokeW = 2.5;
-    const arm = Math.max(Math.min(bw, bh) * 0.2, 6);
+    const strokeW = 3.5;
+    const arm = Math.max(Math.min(bw, bh) * 0.25, 10);
     const labelText = `${obj.label} ${Math.round(obj.confidence * 100)}%`;
-    const labelW = labelText.length * 5.8 + 12;
-    const labelY = by > 20 ? by - 20 : by + bh + 3;
+    const labelW = labelText.length * 7.5 + 16;
+    const labelH = 24;
+    const labelY = by > 28 ? by - 28 : by + bh + 4;
 
     return (
         <g opacity={opacity} style={{ transition: 'opacity 0.3s' }}>
-            {/* Subtle fill */}
-            <rect x={bx} y={by} width={bw} height={bh} fill={color} opacity={0.06} rx={3} />
+            {/* Visible fill */}
+            <rect x={bx} y={by} width={bw} height={bh} fill={color} opacity={0.10} rx={4} />
 
-            {/* Corner brackets */}
+            {/* Full border — thin continuous outline for shape clarity */}
+            <rect x={bx} y={by} width={bw} height={bh} fill="none" stroke={color} strokeWidth={1.5} rx={4} opacity={0.35} />
+
+            {/* Corner brackets — thick and bold */}
             <path d={`M${bx},${by + arm} L${bx},${by} L${bx + arm},${by}`}
                 fill="none" stroke={color} strokeWidth={strokeW} strokeLinecap="round" />
             <path d={`M${bx + bw - arm},${by} L${bx + bw},${by} L${bx + bw},${by + arm}`}
@@ -125,8 +130,8 @@ function CVBox({ obj, vr }: CVBoxProps) {
                 fill="none" stroke={color} strokeWidth={strokeW} strokeLinecap="round" />
 
             {/* Label pill */}
-            <rect x={bx} y={labelY} width={labelW} height={19} rx={3} fill={color} opacity={0.9} />
-            <text x={bx + 6} y={labelY + 13} fill="white" fontSize="10" fontFamily="Inter, sans-serif" fontWeight="700">
+            <rect x={bx} y={labelY} width={labelW} height={labelH} rx={4} fill={color} opacity={0.92} />
+            <text x={bx + 8} y={labelY + 17} fill="white" fontSize="13" fontFamily="Inter, sans-serif" fontWeight="700">
                 {labelText}
             </text>
         </g>
@@ -270,7 +275,7 @@ function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
         return `\n\n## OBIECTE DETECTATE AUTOMAT (Computer Vision - EfficientDet):\n${items.join('\n')}\nFolosește aceste detecții ca referință pentru localizarea obiectelor.`;
     }, [trackedObjects]);
 
-    // ── Gemini compliance scan (hybrid: CV objects + image) ────────────────
+    // ── Backend compliance scan (hybrid: CV objects + image) ────────────────
     const captureAndAnalyze = useCallback(async () => {
         const video = videoRef.current;
         const canvas = canvasRef.current;
@@ -290,7 +295,18 @@ function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
         const cvContext = buildDetectedObjectsSummary();
 
         try {
-            const { result } = await getVisualAudit(base64, 'image/jpeg', zoneType, cvContext);
+            const res = await fetch(`${BACKEND_URL}/api/v1/scan`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image: base64, zoneType, cvContext: cvContext || undefined }),
+            });
+
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({ detail: 'Eroare server' }));
+                throw new Error(err.detail ?? `HTTP ${res.status}`);
+            }
+
+            const result: ComplianceReport = await res.json();
 
             if (!isMountedRef.current) return;
 

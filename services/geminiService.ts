@@ -32,7 +32,8 @@ function extractJson(text: string): RawAIResponse | null {
 export const getVisualAudit = async (
     imageBase64: string,
     mimeType: string,
-    zoneType: ZoneType
+    zoneType: ZoneType,
+    cvContext?: string,
 ): Promise<{ thoughtProcess: string; result: ComplianceReport }> => {
 
     const model = genAI.getGenerativeModel({
@@ -45,7 +46,8 @@ export const getVisualAudit = async (
         }
     });
 
-    const prompt = buildAuditPrompt(zoneType);
+    const basePrompt = buildAuditPrompt(zoneType);
+    const prompt = cvContext ? basePrompt + cvContext : basePrompt;
     const imagePart = { inlineData: { data: imageBase64, mimeType } };
 
     const result = await model.generateContent([prompt, "--- Imagine live de analizat ---", imagePart]);

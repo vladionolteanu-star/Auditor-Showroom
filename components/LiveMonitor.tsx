@@ -1,11 +1,31 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import type { ZoneType, WorkspaceViolation, CalculatedScore } from '../types';
 import { getVisualAudit } from '../services/geminiService';
+import { useMediaPipeDetection, type TrackedObject } from '../hooks/useMediaPipeDetection';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const GEMINI_INTERVAL_MS = 30_000;
-const GEMINI_INITIAL_DELAY_MS = 3_000;
+const GEMINI_INITIAL_DELAY_MS = 5_000;
+
+const OBJECT_COLORS: Record<string, string> = {
+    person: '#06b6d4',
+    'cell phone': '#f43f5e',
+    laptop: '#8b5cf6',
+    tv: '#8b5cf6',
+    keyboard: '#8b5cf6',
+    mouse: '#8b5cf6',
+    bottle: '#f59e0b',
+    cup: '#f59e0b',
+    bowl: '#f59e0b',
+    'wine glass': '#f59e0b',
+    book: '#ec4899',
+    backpack: '#ec4899',
+    handbag: '#ec4899',
+    suitcase: '#ec4899',
+    scissors: '#f97316',
+    clock: '#94a3b8',
+};
 
 const SEVERITY_COLORS: Record<string, string> = {
     'CRITICĂ': '#ef4444',
@@ -53,19 +73,67 @@ function computeVideoRect(video: HTMLVideoElement): VideoRect {
     return { x: (elW - w) / 2, y: 0, width: w, height: elH };
 }
 
-function getScoreColor(score: number): string {
-    if (score >= 95) return '#22c55e';
-    if (score >= 75) return '#eab308';
+function getScoreColor(s: number): string {
+    if (s >= 95) return '#22c55e';
+    if (s >= 75) return '#eab308';
     return '#ef4444';
 }
 
-function getScoreBg(score: number): string {
-    if (score >= 95) return 'rgba(34, 197, 94, 0.15)';
-    if (score >= 75) return 'rgba(234, 179, 8, 0.15)';
+function getScoreBg(s: number): string {
+    if (s >= 95) return 'rgba(34, 197, 94, 0.15)';
+    if (s >= 75) return 'rgba(234, 179, 8, 0.15)';
     return 'rgba(239, 68, 68, 0.15)';
 }
 
-// ─── Violation overlay on video ───────────────────────────────────────────────
+function getObjectColor(label: string): string {
+    return OBJECT_COLORS[label.toLowerCase()] ?? '#94a3b8';
+}
+
+// ─── CV Tracked Object Box (real-time, smooth) ───────────────────────────────
+
+interface CVBoxProps {
+    obj: TrackedObject;
+    vr: VideoRect;
+}
+
+function CVBox({ obj, vr }: CVBoxProps) {
+    const bx = obj.bbox.x * vr.width;
+    const by = obj.bbox.y * vr.height;
+    const bw = obj.bbox.width * vr.width;
+    const bh = obj.bbox.height * vr.height;
+
+    const color = getObjectColor(obj.label);
+    const opacity = Math.min(1, obj.confidence) * (obj.framesMissing > 0 ? 0.4 : 0.85);
+    const arm = Math.max(Math.min(bw, bh) * 0.2, 6);
+    const labelText = `${obj.label} ${Math.round(obj.confidence * 100)}%`;
+    const labelW = labelText.length * 5.8 + 12;
+    const labelY = by > 20 ? by - 20 : by + bh + 3;
+
+    return (
+        <g opacity={opacity} style={{ transition: 'opacity 0.3s' }}>
+            {/* Subtle fill */}
+            <rect x={bx} y={by} width={bw} height={bh} fill={color} opacity={0.06} rx={3} />
+
+            {/* Corner brackets */}
+            <path d={`M${bx},${by + arm} L${bx},${by} L${bx + arm},${by}`}
+                fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" />
+            <path d={`M${bx + bw - arm},${by} L${bx + bw},${by} L${bx + bw},${by + arm}`}
+                fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" />
+            <path d={`M${bx},${by + bh - arm} L${bx},${by + bh} L${bx + arm},${by + bh}`}
+                fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" />
+            <path d={`M${bx + bw - arm},${by + bh} L${bx + bw},${by + bh} L${bx + bw},${by + bh - arm}`}
+                fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" />
+
+            {/* Label pill */}
+            <rect x={bx} y={labelY} width={labelW} height={17} rx={3} fill={color} opacity={0.8} />
+            <text x={bx + 6} y={labelY + 12} fill="white" fontSize="9" fontFamily="Inter, sans-serif" fontWeight="600">
+                {labelText}
+            </text>
+        </g>
+    );
+}
+
+// ─── Gemini violation overlay (persistent between scans) ─────────────────────
 
 interface ViolationOverlayProps {
     violation: WorkspaceViolation;
@@ -86,7 +154,8 @@ function ViolationOverlay({ violation, vr }: ViolationOverlayProps) {
     return (
         <g>
             <rect x={bx} y={by} width={bw} height={bh} fill={color} opacity={0.12} />
-            <rect x={bx} y={by} width={bw} height={bh} fill="none" stroke={color} strokeWidth={2} rx={4} opacity={0.8} />
+            <rect x={bx} y={by} width={bw} height={bh} fill="none" stroke={color} strokeWidth={2} rx={4}
+                strokeDasharray="6 3" opacity={0.7} />
         </g>
     );
 }
@@ -117,6 +186,13 @@ function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
     const [scanCount, setScanCount] = useState(0);
     const [lastError, setLastError] = useState<string | null>(null);
     const [showViolationPanel, setShowViolationPanel] = useState(false);
+
+    // ── MediaPipe real-time detection ──────────────────────────────────────
+    const { trackedObjects, isModelLoading, fps, modelError } = useMediaPipeDetection(videoRef, {
+        enabled: isStreaming,
+        minConfidence: 0.40,
+        targetFps: 15,
+    });
 
     // ── Camera startup ─────────────────────────────────────────────────────
     useEffect(() => {
@@ -162,9 +238,7 @@ function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
         const video = videoRef.current;
         if (!video || !isStreaming) return;
 
-        const update = () => {
-            setVideoRect(computeVideoRect(video));
-        };
+        const update = () => { setVideoRect(computeVideoRect(video)); };
 
         const observer = new ResizeObserver(update);
         observer.observe(video);
@@ -187,7 +261,16 @@ function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
         return () => { isMountedRef.current = false; };
     }, []);
 
-    // ── Gemini compliance scan ─────────────────────────────────────────────
+    // ── Build detected objects summary for Gemini context ──────────────────
+    const buildDetectedObjectsSummary = useCallback((): string => {
+        if (trackedObjects.length === 0) return '';
+        const items = trackedObjects.map(
+            (obj) => `- ${obj.label} (${Math.round(obj.confidence * 100)}%) la coordonate [${obj.bbox.x.toFixed(2)}, ${obj.bbox.y.toFixed(2)}, ${obj.bbox.width.toFixed(2)}, ${obj.bbox.height.toFixed(2)}]`
+        );
+        return `\n\n## OBIECTE DETECTATE AUTOMAT (Computer Vision - EfficientDet):\n${items.join('\n')}\nFolosește aceste detecții ca referință pentru localizarea obiectelor.`;
+    }, [trackedObjects]);
+
+    // ── Gemini compliance scan (hybrid: CV objects + image) ────────────────
     const captureAndAnalyze = useCallback(async () => {
         const video = videoRef.current;
         const canvas = canvasRef.current;
@@ -205,8 +288,10 @@ function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
         setCountdown(null);
         setLastError(null);
 
+        const cvContext = buildDetectedObjectsSummary();
+
         try {
-            const { result } = await getVisualAudit(base64, 'image/jpeg', zoneType);
+            const { result } = await getVisualAudit(base64, 'image/jpeg', zoneType, cvContext);
 
             if (!isMountedRef.current) return;
 
@@ -218,17 +303,15 @@ function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
             if (result.violations.length > 0) {
                 setShowViolationPanel(true);
             }
-        } catch (err) {
+        } catch {
             if (!isMountedRef.current) return;
-            setLastError(
-                err instanceof Error ? 'Eroare la scanare. Se reîncearcă...' : 'Eroare necunoscută'
-            );
+            setLastError('Eroare la scanare. Se reîncearcă...');
         } finally {
             if (isMountedRef.current) {
                 setIsScanning(false);
             }
         }
-    }, [zoneType]);
+    }, [zoneType, buildDetectedObjectsSummary]);
 
     const captureRef = useRef(captureAndAnalyze);
     captureRef.current = captureAndAnalyze;
@@ -284,6 +367,7 @@ function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
     const vr = videoRect;
     const hasVideo = vr.width > 0 && vr.height > 0;
     const violationCount = violations.length;
+    const objectCount = trackedObjects.length;
 
     return (
         <div className="fixed inset-0 bg-black flex flex-col">
@@ -308,8 +392,8 @@ function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
                     </div>
                 )}
 
-                {/* Violation bounding boxes on video — persistent until next scan */}
-                {hasVideo && violations.length > 0 && (
+                {/* ── SVG overlay: CV tracked objects (real-time) + Gemini violations ── */}
+                {hasVideo && (
                     <svg
                         className="absolute pointer-events-none z-30"
                         style={{ left: vr.x, top: vr.y }}
@@ -317,6 +401,12 @@ function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
                         height={vr.height}
                         viewBox={`0 0 ${vr.width} ${vr.height}`}
                     >
+                        {/* Real-time CV boxes (smooth, tracked) */}
+                        {trackedObjects.map((obj) => (
+                            <CVBox key={obj.id} obj={obj} vr={vr} />
+                        ))}
+
+                        {/* Gemini compliance violations (dashed, persistent) */}
                         {violations.map((v) => (
                             <ViolationOverlay key={`${v.severity}-${v.description}`} violation={v} vr={vr} />
                         ))}
@@ -360,7 +450,7 @@ function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
                                     <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 backdrop-blur-md border border-white/10">
                                         <span className="text-3xl font-bold font-mono text-white/20">--</span>
                                         <span className="text-xs text-white/30">
-                                            {isScanning ? 'Scanare...' : 'Asteptare...'}
+                                            {isModelLoading ? 'Model CV...' : isScanning ? 'Scanare...' : 'Asteptare...'}
                                         </span>
                                     </div>
                                 )}
@@ -392,31 +482,52 @@ function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
                                     </button>
                                 </div>
 
-                                {/* Status pill */}
-                                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-black/60 backdrop-blur-md border border-white/10">
-                                    {isScanning ? (
-                                        <>
-                                            <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-                                            <span className="text-[11px] text-amber-300 font-medium">Scanare...</span>
-                                        </>
-                                    ) : countdown !== null ? (
-                                        <>
-                                            <div className="w-2 h-2 rounded-full bg-white/30" />
-                                            <span className="text-[11px] text-white/50 font-mono">{countdown}s</span>
-                                        </>
-                                    ) : (
-                                        <>
-                                            <div className="w-2 h-2 rounded-full bg-green-400" />
-                                            <span className="text-[11px] text-green-300">Live</span>
-                                        </>
-                                    )}
+                                {/* Status row: CV + Gemini */}
+                                <div className="flex items-center gap-1.5">
+                                    {/* CV status */}
+                                    <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-black/60 backdrop-blur-md border border-white/10">
+                                        {isModelLoading ? (
+                                            <>
+                                                <div className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse" />
+                                                <span className="text-[10px] text-violet-300">CV...</span>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <div className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
+                                                <span className="text-[10px] text-cyan-300 font-mono">{objectCount} obj</span>
+                                                {fps > 0 && (
+                                                    <span className="text-[10px] text-white/30 font-mono">{fps}fps</span>
+                                                )}
+                                            </>
+                                        )}
+                                    </div>
+
+                                    {/* Gemini status */}
+                                    <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-black/60 backdrop-blur-md border border-white/10">
+                                        {isScanning ? (
+                                            <>
+                                                <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                                                <span className="text-[10px] text-amber-300">AI...</span>
+                                            </>
+                                        ) : countdown !== null ? (
+                                            <>
+                                                <div className="w-1.5 h-1.5 rounded-full bg-white/30" />
+                                                <span className="text-[10px] text-white/40 font-mono">{countdown}s</span>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <div className="w-1.5 h-1.5 rounded-full bg-green-400" />
+                                                <span className="text-[10px] text-green-300">Live</span>
+                                            </>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     </div>
                 )}
 
-                {/* ── SCAN NOW button (floating) ── */}
+                {/* ── SCAN NOW button ── */}
                 {hasVideo && !isScanning && (
                     <button
                         onClick={() => { captureRef.current().catch(() => {}); }}
@@ -434,7 +545,7 @@ function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
                     </button>
                 )}
 
-                {/* Scanning indicator overlay */}
+                {/* Scanning overlay */}
                 {isScanning && hasVideo && (
                     <div
                         className="absolute z-30 pointer-events-none"
@@ -445,12 +556,12 @@ function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
                     </div>
                 )}
 
-                {/* Error toast */}
-                {lastError && (
+                {/* Error toasts */}
+                {(lastError || modelError) && (
                     <div className="absolute bottom-16 left-3 right-3 z-50">
                         <div className="bg-red-900/80 backdrop-blur-md rounded-xl px-4 py-3 text-sm text-red-300 border border-red-500/30">
                             <span className="font-bold text-red-400">Eroare: </span>
-                            {lastError.length > 100 ? lastError.substring(0, 100) + '...' : lastError}
+                            {(lastError ?? modelError ?? '').substring(0, 100)}
                         </div>
                     </div>
                 )}
@@ -460,7 +571,6 @@ function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
             <div className={`bg-[#0c1324] border-t border-white/10 transition-all duration-300 overflow-hidden ${
                 showViolationPanel && (violationCount > 0 || recommendations.length > 0) ? 'max-h-[40vh]' : 'max-h-14'
             }`}>
-                {/* Panel header — always visible */}
                 <button
                     onClick={() => setShowViolationPanel(prev => !prev)}
                     className="w-full flex items-center justify-between px-4 py-3 text-left"
@@ -483,7 +593,9 @@ function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
                                 <span className="text-sm text-green-400/80 font-medium">Totul în regulă</span>
                             </div>
                         ) : (
-                            <span className="text-sm text-white/40">Se inițializează...</span>
+                            <span className="text-sm text-white/40">
+                                {isModelLoading ? 'Se încarcă modelul CV...' : 'Se inițializează...'}
+                            </span>
                         )}
                     </div>
 
@@ -497,7 +609,6 @@ function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
                     )}
                 </button>
 
-                {/* Violation list — scrollable */}
                 {showViolationPanel && (violationCount > 0 || recommendations.length > 0) && (
                     <div className="overflow-y-auto px-3 pb-3 space-y-2" style={{ maxHeight: 'calc(40vh - 48px)' }}>
                         {violations.map((v) => {
@@ -521,7 +632,6 @@ function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
                             );
                         })}
 
-                        {/* Recommendations */}
                         {recommendations.length > 0 && (
                             <div className="mt-2 px-3 py-2.5 rounded-xl bg-cyan-500/10 border border-cyan-400/20">
                                 <p className="text-[11px] text-cyan-400 font-semibold mb-1.5 uppercase tracking-wider">Recomandări</p>

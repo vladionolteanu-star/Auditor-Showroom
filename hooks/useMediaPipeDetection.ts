@@ -157,26 +157,32 @@ async function loadDetector(minConfidence: number): Promise<MPObjectDetector> {
     if (detectorLoadPromise) return detectorLoadPromise;
 
     detectorLoadPromise = (async () => {
-        const vision = await import('@mediapipe/tasks-vision');
-        const { ObjectDetector, FilesetResolver } = vision;
+        try {
+            const vision = await import('@mediapipe/tasks-vision');
+            const { ObjectDetector, FilesetResolver } = vision;
 
-        const wasmFileset = await FilesetResolver.forVisionTasks(
-            'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
-        );
+            const wasmFileset = await FilesetResolver.forVisionTasks(
+                'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
+            );
 
-        const detector = await ObjectDetector.createFromOptions(wasmFileset, {
-            baseOptions: {
-                modelAssetPath:
-                    'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite',
-                delegate: 'GPU',
-            },
-            scoreThreshold: minConfidence,
-            maxResults: 15,
-            runningMode: 'VIDEO',
-        });
+            const detector = await ObjectDetector.createFromOptions(wasmFileset, {
+                baseOptions: {
+                    modelAssetPath:
+                        'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite',
+                    delegate: 'GPU',
+                },
+                scoreThreshold: minConfidence,
+                maxResults: 15,
+                runningMode: 'VIDEO',
+            });
 
-        sharedDetector = detector as unknown as MPObjectDetector;
-        return sharedDetector;
+            sharedDetector = detector as unknown as MPObjectDetector;
+            return sharedDetector;
+        } catch (err) {
+            // Reset so next call retries instead of returning the rejected promise
+            detectorLoadPromise = null;
+            throw err;
+        }
     })();
 
     return detectorLoadPromise;
@@ -214,12 +220,21 @@ export function useMediaPipeDetection(
         }
     }, []);
 
+    const consecutiveErrorsRef = useRef(0);
+    const ERROR_THRESHOLD = 10;
+
     const runDetection = useCallback(
         (now: number) => {
             if (!isMountedRef.current || !detectorRef.current) return;
 
             const video = videoRef.current;
             if (!video || video.readyState < 2 || video.paused || video.ended) {
+                rafIdRef.current = requestAnimationFrame(runDetection);
+                return;
+            }
+
+            // Guard against zero dimensions (some browsers report 0 before first decoded frame)
+            if (!video.videoWidth || !video.videoHeight) {
                 rafIdRef.current = requestAnimationFrame(runDetection);
                 return;
             }
@@ -239,6 +254,10 @@ export function useMediaPipeDetection(
 
             try {
                 const result = detectorRef.current.detectForVideo(video, now);
+                consecutiveErrorsRef.current = 0;
+
+                const vw = video.videoWidth;
+                const vh = video.videoHeight;
 
                 const rawDetections: RawDetection[] = result.detections
                     .filter((d) => d.boundingBox && d.categories.length > 0)
@@ -249,10 +268,10 @@ export function useMediaPipeDetection(
                             label: cat.categoryName,
                             confidence: cat.score,
                             bbox: {
-                                x: bb.originX / video.videoWidth,
-                                y: bb.originY / video.videoHeight,
-                                width: bb.width / video.videoWidth,
-                                height: bb.height / video.videoHeight,
+                                x: bb.originX / vw,
+                                y: bb.originY / vh,
+                                width: bb.width / vw,
+                                height: bb.height / vh,
                             },
                         };
                     });
@@ -265,14 +284,18 @@ export function useMediaPipeDetection(
                     setFps(Math.round(emaFpsRef.current));
                 }
             } catch {
-                // Non-fatal detection error — continue loop
+                consecutiveErrorsRef.current += 1;
+                if (consecutiveErrorsRef.current >= ERROR_THRESHOLD && isMountedRef.current) {
+                    setModelError('Detecția CV a eșuat repetat. Reîncărcați pagina.');
+                    return; // Stop the loop
+                }
             }
 
             if (isMountedRef.current) {
                 rafIdRef.current = requestAnimationFrame(runDetection);
             }
         },
-        [videoRef, frameIntervalMs],
+        [videoRef, frameIntervalMs, setModelError],
     );
 
     // Load model

@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git remote:*)",
+      "Bash(git add:*)",
+      "Bash(python -c \"import ast; import pathlib; errors=[]; [errors.append\\(f'{p}: {e}'\\) for p in pathlib.Path\\('backend'\\).rglob\\('*.py'\\) if p.read_text\\(\\) for e in [None] if not \\(lambda: \\(ast.parse\\(p.read_text\\(\\)\\), True\\)\\)\\(\\)[1]]\")",
+      "Bash(python -c ':*)",
+      "Bash(python -c \"import fastapi; import pydantic; import google.generativeai; print\\('fastapi:', fastapi.__version__\\); print\\('pydantic:', pydantic.__version__\\)\")",
+      "Bash(python -c \"import ast; [ast.parse\\(open\\(f, encoding='utf-8'\\).read\\(\\)\\) for f in ['backend/services/yolo_service.py', 'backend/api/v1/scan.py']]; print\\('All files parse OK'\\)\")",
+      "Bash(git commit -m ':*)",
+      "Bash(git push:*)"
+    ]
+  }
+}

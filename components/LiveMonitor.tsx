@@ -1,6 +1,6 @@
-import { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import type { ZoneType, WorkspaceViolation, CalculatedScore, ComplianceReport } from '../types';
-import { useMediaPipeDetection, type TrackedObject } from '../hooks/useMediaPipeDetection';
+import { useYoloDetection, type TrackedObject } from '../hooks/useYoloDetection';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
 
@@ -96,7 +96,7 @@ interface CVBoxProps {
     vr: VideoRect;
 }
 
-function CVBox({ obj, vr }: CVBoxProps) {
+const CVBox = React.memo(({ obj, vr }: CVBoxProps) => {
     const bx = obj.bbox.x * vr.width;
     const by = obj.bbox.y * vr.height;
     const bw = obj.bbox.width * vr.width;
@@ -136,7 +136,7 @@ function CVBox({ obj, vr }: CVBoxProps) {
             </text>
         </g>
     );
-}
+});
 
 // ─── Gemini violation overlay (persistent between scans) ─────────────────────
 
@@ -145,7 +145,7 @@ interface ViolationOverlayProps {
     vr: VideoRect;
 }
 
-function ViolationOverlay({ violation, vr }: ViolationOverlayProps) {
+const ViolationOverlay = React.memo(({ violation, vr }: ViolationOverlayProps) => {
     if (!violation.boundingBox) return null;
 
     const { x: nx, y: ny, width: nw, height: nh } = violation.boundingBox;
@@ -163,7 +163,7 @@ function ViolationOverlay({ violation, vr }: ViolationOverlayProps) {
                 strokeDasharray="6 3" opacity={0.7} />
         </g>
     );
-}
+});
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
@@ -190,11 +190,12 @@ function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
     const [lastError, setLastError] = useState<string | null>(null);
     const [showViolationPanel, setShowViolationPanel] = useState(false);
 
-    // ── MediaPipe real-time detection ──────────────────────────────────────
-    const { trackedObjects, isModelLoading, fps, modelError } = useMediaPipeDetection(videoRef, {
+    // ── YOLO real-time detection ──────────────────────────────────────────
+    const { trackedObjects, isModelLoading, fps, modelError } = useYoloDetection(videoRef, {
         enabled: isStreaming,
         minConfidence: 0.40,
         targetFps: 15,
+        modelPath: '/yolo11n.onnx'
     });
 
     // ── Camera startup ─────────────────────────────────────────────────────
@@ -272,7 +273,7 @@ function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
         const items = activeObjects.map(
             (obj) => `- ${obj.label} (${Math.round(obj.confidence * 100)}%) la coordonate [${obj.bbox.x.toFixed(2)}, ${obj.bbox.y.toFixed(2)}, ${obj.bbox.width.toFixed(2)}, ${obj.bbox.height.toFixed(2)}]`
         );
-        return `\n\n## OBIECTE DETECTATE AUTOMAT (Computer Vision - EfficientDet):\n${items.join('\n')}\nFolosește aceste detecții ca referință pentru localizarea obiectelor.`;
+        return `\n\n## OBIECTE DETECTATE AUTOMAT (Computer Vision - YOLO):\n${items.join('\n')}\nFolosește aceste detecții ca referință pentru localizarea obiectelor.`;
     }, [trackedObjects]);
 
     // ── Backend compliance scan (hybrid: CV objects + image) ────────────────

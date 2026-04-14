@@ -1,7 +1,9 @@
-"""YOLOv11 server-side object detection.
+"""YOLO-World server-side open-vocabulary object detection.
 
-Runs deterministic inference on every scan image before Gemini,
-providing pixel-level detection that complements the phone's MediaPipe.
+Unlike standard YOLO (80 COCO classes), YOLO-World can detect ANY object
+you describe in text — no retraining needed. We define showroom-specific
+classes here and the model finds them by understanding language.
+
 The model is loaded once at import time and reused across requests.
 """
 
@@ -17,18 +19,89 @@ from ultralytics import YOLO
 
 logger = logging.getLogger(__name__)
 
+# ── Showroom-specific classes (open-vocabulary) ──────────────────────────────
+
+SHOWROOM_CLASSES = [
+    # Persoane
+    "person",
+    # Obiecte personale (neconforme)
+    "cell phone",
+    "headphones",
+    "earbuds",
+    "personal bag",
+    "backpack",
+    "handbag",
+    "water bottle",
+    "coffee cup",
+    "coffee cup with lid",
+    "dirty cup",
+    "food container",
+    "lunch bag",
+    "wallet",
+    "sunglasses",
+    "jacket on chair",
+    # Documente & birou
+    "paper document",
+    "receipt",
+    "sticky note",
+    "folder",
+    "open folder",
+    "stack of papers",
+    "crumpled paper",
+    "pen",
+    "pencil",
+    "marker",
+    "business card",
+    "price tag",
+    # Echipament standard
+    "computer monitor",
+    "laptop",
+    "keyboard",
+    "mouse",
+    "printer",
+    "POS terminal",
+    "barcode scanner",
+    "desk lamp",
+    "office chair",
+    # Mobilier & context
+    "desk",
+    "shelf",
+    "cabinet",
+    "trash can",
+    "potted plant",
+    "open drawer",
+    # Cabluri & accesorii
+    "cable",
+    "usb cable",
+    "charger",
+    "power strip",
+    "keys",
+    "scissors",
+    "tape dispenser",
+    "stapler",
+    # Materiale
+    "book",
+    "catalog",
+    "promotional flyer",
+    "plastic bag",
+    "umbrella",
+]
+
 # ── Model singleton ─────────────────────────────────────────────────────────
 
 _model: YOLO | None = None
 
 
 def _get_model() -> YOLO:
-    """Lazy-load YOLOv11n (nano) — fast enough for per-request inference."""
+    """Lazy-load YOLO-World small — open-vocabulary detection."""
     global _model
     if _model is None:
-        logger.info("Loading YOLOv11n model (first request)…")
-        _model = YOLO("yolo11n.pt")
-        logger.info("YOLOv11n model loaded.")
+        logger.info("Loading YOLO-World model (first request)…")
+        _model = YOLO("yolov8s-worldv2.pt")
+        _model.set_classes(SHOWROOM_CLASSES)
+        logger.info(
+            "YOLO-World loaded with %d custom classes.", len(SHOWROOM_CLASSES)
+        )
     return _model
 
 
@@ -46,20 +119,20 @@ class YoloDetection(NamedTuple):
 # ── Core function ────────────────────────────────────────────────────────────
 
 def detect_objects(image_base64: str) -> list[YoloDetection]:
-    """Run YOLOv11 on a base64-encoded JPEG and return normalised detections."""
+    """Run YOLO-World on a base64-encoded JPEG and return normalised detections."""
 
     raw_bytes = base64.b64decode(image_base64)
     img = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
     img_w, img_h = img.size
 
     model = _get_model()
-    results = model(img, verbose=False)
+    results = model(img, verbose=False, conf=0.15)
 
     detections: list[YoloDetection] = []
     for result in results:
         for box in result.boxes:
             cls_id = int(box.cls[0])
-            label = model.names[cls_id]
+            label = SHOWROOM_CLASSES[cls_id] if cls_id < len(SHOWROOM_CLASSES) else f"class_{cls_id}"
             conf = float(box.conf[0])
 
             # xyxy → normalised xywh
@@ -78,14 +151,14 @@ def detect_objects(image_base64: str) -> list[YoloDetection]:
                 height=round(nh, 4),
             ))
 
-    logger.info("YOLO detected %d objects", len(detections))
+    logger.info("YOLO-World detected %d objects", len(detections))
     return detections
 
 
 # ── Formatter — builds the text block that gets injected into Gemini ─────────
 
 def format_yolo_context(detections: list[YoloDetection]) -> str:
-    """Format YOLO detections as a text block for the Gemini prompt."""
+    """Format YOLO-World detections as a text block for the Gemini prompt."""
     if not detections:
         return ""
 
@@ -96,7 +169,9 @@ def format_yolo_context(detections: list[YoloDetection]) -> str:
     ]
 
     return (
-        "\n\n## OBIECTE DETECTATE PE SERVER (YOLOv11 — detecție deterministă, de încredere):\n"
+        "\n\n## OBIECTE DETECTATE PE SERVER (YOLO-World — detecție open-vocabulary, de încredere):\n"
         + "\n".join(lines)
         + "\nAceste detecții sunt de ÎNALTĂ PRECIZIE. Folosește-le ca sursă primară de localizare."
+        + "\nClasele detectate includ obiecte specifice showroom-ului (documente, telefoane, "
+        + "căni cafea, dosare, echipament birou etc.) — nu doar cele 80 de clase generice COCO."
     )

@@ -1,43 +1,32 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useState, useCallback } from 'react';
 import type { ZoneType, WorkspaceViolation, CalculatedScore } from '../types';
 import { getVisualAudit } from '../services/geminiService';
-import { useObjectDetection } from '../hooks/useObjectDetection';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const GEMINI_INTERVAL_MS = 30_000;
-const GEMINI_INITIAL_DELAY_MS = 5_000;
-const VIOLATION_VISIBLE_MS = 10_000;
-
-const OBJECT_COLORS: Record<string, string> = {
-    person: '#06b6d4',
-    'cell phone': '#8b5cf6',
-    laptop: '#8b5cf6',
-    tv: '#8b5cf6',
-    keyboard: '#8b5cf6',
-    mouse: '#8b5cf6',
-    bottle: '#f59e0b',
-    cup: '#f59e0b',
-    bowl: '#f59e0b',
-    'wine glass': '#f59e0b',
-    fork: '#f59e0b',
-    knife: '#f59e0b',
-    spoon: '#f59e0b',
-    backpack: '#ec4899',
-    handbag: '#ec4899',
-    suitcase: '#ec4899',
-};
+const GEMINI_INITIAL_DELAY_MS = 3_000;
 
 const SEVERITY_COLORS: Record<string, string> = {
     'CRITICĂ': '#ef4444',
-    'Mare': '#ec4899',
+    'Mare': '#f97316',
     'Medie': '#eab308',
     'Mică': '#3b82f6',
 };
 
-function getObjectColor(cls: string): string {
-    return OBJECT_COLORS[cls.toLowerCase()] ?? '#94a3b8';
-}
+const SEVERITY_BG: Record<string, string> = {
+    'CRITICĂ': 'rgba(239, 68, 68, 0.15)',
+    'Mare': 'rgba(249, 115, 22, 0.15)',
+    'Medie': 'rgba(234, 179, 8, 0.15)',
+    'Mică': 'rgba(59, 130, 246, 0.15)',
+};
+
+const SEVERITY_ICONS: Record<string, string> = {
+    'CRITICĂ': '🔴',
+    'Mare': '🟠',
+    'Medie': '🟡',
+    'Mică': '🔵',
+};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -64,79 +53,26 @@ function computeVideoRect(video: HTMLVideoElement): VideoRect {
     return { x: (elW - w) / 2, y: 0, width: w, height: elH };
 }
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
-
-interface TFBoxProps {
-    cls: string;
-    score: number;
-    bbox: [number, number, number, number];
-    videoNaturalW: number;
-    videoNaturalH: number;
-    vr: VideoRect;
+function getScoreColor(score: number): string {
+    if (score >= 95) return '#22c55e';
+    if (score >= 75) return '#eab308';
+    return '#ef4444';
 }
 
-const TFBox: React.FC<TFBoxProps> = ({ cls, score, bbox, videoNaturalW, videoNaturalH, vr }) => {
-    if (!videoNaturalW || !videoNaturalH) return null;
+function getScoreBg(score: number): string {
+    if (score >= 95) return 'rgba(34, 197, 94, 0.15)';
+    if (score >= 75) return 'rgba(234, 179, 8, 0.15)';
+    return 'rgba(239, 68, 68, 0.15)';
+}
 
-    const scaleX = vr.width / videoNaturalW;
-    const scaleY = vr.height / videoNaturalH;
+// ─── Violation overlay on video ───────────────────────────────────────────────
 
-    const rx = bbox[0] * scaleX;
-    const ry = bbox[1] * scaleY;
-    const rw = bbox[2] * scaleX;
-    const rh = bbox[3] * scaleY;
-
-    const color = getObjectColor(cls);
-    const arm = Math.max(Math.min(rw, rh) * 0.18, 7);
-    const labelText = `${cls} ${Math.round(score * 100)}%`;
-    const labelW = labelText.length * 6.2 + 14;
-    const labelY = ry > 24 ? ry - 24 : ry + rh + 4;
-
-    return (
-        <g>
-            {/* Dim fill */}
-            <rect x={rx} y={ry} width={rw} height={rh} fill={color} opacity={0.08} />
-
-            {/* Corner brackets — top-left */}
-            <path
-                d={`M${rx},${ry + arm} L${rx},${ry} L${rx + arm},${ry}`}
-                fill="none" stroke={color} strokeWidth={2} strokeLinecap="round"
-            />
-            {/* top-right */}
-            <path
-                d={`M${rx + rw - arm},${ry} L${rx + rw},${ry} L${rx + rw},${ry + arm}`}
-                fill="none" stroke={color} strokeWidth={2} strokeLinecap="round"
-            />
-            {/* bottom-left */}
-            <path
-                d={`M${rx},${ry + rh - arm} L${rx},${ry + rh} L${rx + arm},${ry + rh}`}
-                fill="none" stroke={color} strokeWidth={2} strokeLinecap="round"
-            />
-            {/* bottom-right */}
-            <path
-                d={`M${rx + rw - arm},${ry + rh} L${rx + rw},${ry + rh} L${rx + rw},${ry + rh - arm}`}
-                fill="none" stroke={color} strokeWidth={2} strokeLinecap="round"
-            />
-
-            {/* Label */}
-            <rect x={rx} y={labelY} width={labelW} height={20} rx={3} fill={color} opacity={0.85} />
-            <text
-                x={rx + 7} y={labelY + 14}
-                fill="white" fontSize="10" fontFamily="Inter, ui-sans-serif, sans-serif" fontWeight="600"
-            >
-                {labelText}
-            </text>
-        </g>
-    );
-};
-
-interface ViolationBoxProps {
+interface ViolationOverlayProps {
     violation: WorkspaceViolation;
     vr: VideoRect;
-    opacity: number;
 }
 
-const ViolationBox: React.FC<ViolationBoxProps> = ({ violation, vr, opacity }) => {
+function ViolationOverlay({ violation, vr }: ViolationOverlayProps) {
     if (!violation.boundingBox) return null;
 
     const { x: nx, y: ny, width: nw, height: nh } = violation.boundingBox;
@@ -146,23 +82,14 @@ const ViolationBox: React.FC<ViolationBoxProps> = ({ violation, vr, opacity }) =
     const bh = nh * vr.height;
 
     const color = SEVERITY_COLORS[violation.severity] ?? '#eab308';
-    const label = violation.description.length > 30
-        ? violation.description.substring(0, 30) + '…'
-        : violation.description;
-    const labelW = label.length * 6.5 + 16;
-    const labelY = by > 28 ? by - 28 : by + bh + 4;
 
     return (
-        <g opacity={opacity}>
-            <rect x={bx} y={by} width={bw} height={bh} fill={color} opacity={0.18} />
-            <rect x={bx} y={by} width={bw} height={bh} fill="none" stroke={color} strokeWidth={2.5} strokeDasharray="6 3" opacity={0.9} />
-            <rect x={bx} y={labelY} width={labelW} height={22} rx={4} fill={color} opacity={0.92} />
-            <text x={bx + 8} y={labelY + 15} fill="white" fontSize="11" fontFamily="Inter, ui-sans-serif, sans-serif" fontWeight="700">
-                {label}
-            </text>
+        <g>
+            <rect x={bx} y={by} width={bw} height={bh} fill={color} opacity={0.12} />
+            <rect x={bx} y={by} width={bw} height={bh} fill="none" stroke={color} strokeWidth={2} rx={4} opacity={0.8} />
         </g>
     );
-};
+}
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
@@ -171,32 +98,25 @@ interface LiveMonitorProps {
     onChangeZone: (zone: ZoneType) => void;
 }
 
-const LiveMonitor: React.FC<LiveMonitorProps> = ({ zoneType, onChangeZone }) => {
+function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const streamRef = useRef<MediaStream | null>(null);
     const geminiTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const violationFadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const isMountedRef = useRef(true);
 
     const [isStreaming, setIsStreaming] = useState(false);
     const [cameraError, setCameraError] = useState<string | null>(null);
     const [videoRect, setVideoRect] = useState<VideoRect>({ x: 0, y: 0, width: 0, height: 0 });
-    const [naturalSize, setNaturalSize] = useState({ w: 0, h: 0 });
 
     const [score, setScore] = useState<CalculatedScore | null>(null);
     const [violations, setViolations] = useState<WorkspaceViolation[]>([]);
-    const [violationOpacity, setViolationOpacity] = useState(0);
-    const [isGeminiScanning, setIsGeminiScanning] = useState(false);
-    const [geminiCountdown, setGeminiCountdown] = useState<number | null>(null);
+    const [recommendations, setRecommendations] = useState<string[]>([]);
+    const [isScanning, setIsScanning] = useState(false);
+    const [countdown, setCountdown] = useState<number | null>(null);
     const [scanCount, setScanCount] = useState(0);
-    const [lastGeminiError, setLastGeminiError] = useState<string | null>(null);
-
-    // ── TF.js object detection ─────────────────────────────────────────────
-    const { detections, isModelLoading, fps } = useObjectDetection(videoRef, {
-        enabled: isStreaming,
-        minScore: 0.45,
-        targetFps: 12,
-    });
+    const [lastError, setLastError] = useState<string | null>(null);
+    const [showViolationPanel, setShowViolationPanel] = useState(false);
 
     // ── Camera startup ─────────────────────────────────────────────────────
     useEffect(() => {
@@ -237,36 +157,35 @@ const LiveMonitor: React.FC<LiveMonitorProps> = ({ zoneType, onChangeZone }) => 
         };
     }, []);
 
-    // ── Track rendered video rect (letterbox-aware) ────────────────────────
+    // ── Track rendered video rect ──────────────────────────────────────────
     useEffect(() => {
         const video = videoRef.current;
         if (!video || !isStreaming) return;
 
         const update = () => {
-            const rect = computeVideoRect(video);
-            setVideoRect(rect);
-            if (video.videoWidth && video.videoHeight) {
-                setNaturalSize({ w: video.videoWidth, h: video.videoHeight });
-            }
+            setVideoRect(computeVideoRect(video));
         };
 
         const observer = new ResizeObserver(update);
         observer.observe(video);
         video.addEventListener('loadedmetadata', update);
-        video.addEventListener('resize', update);
 
-        // Poll briefly after load to catch initial dimensions
-        const poll = setInterval(update, 250);
+        const poll = setInterval(update, 500);
         const stopPoll = setTimeout(() => clearInterval(poll), 4000);
 
         return () => {
             observer.disconnect();
             video.removeEventListener('loadedmetadata', update);
-            video.removeEventListener('resize', update);
             clearInterval(poll);
             clearTimeout(stopPoll);
         };
     }, [isStreaming]);
+
+    // ── Unmount tracking ────────────────────────────────────────────────────
+    useEffect(() => {
+        isMountedRef.current = true;
+        return () => { isMountedRef.current = false; };
+    }, []);
 
     // ── Gemini compliance scan ─────────────────────────────────────────────
     const captureAndAnalyze = useCallback(async () => {
@@ -280,29 +199,34 @@ const LiveMonitor: React.FC<LiveMonitorProps> = ({ zoneType, onChangeZone }) => 
         if (!ctx) return;
 
         ctx.drawImage(video, 0, 0);
-        const base64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+        const base64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1] ?? '';
 
-        setIsGeminiScanning(true);
-        setGeminiCountdown(null);
-        setLastGeminiError(null);
+        setIsScanning(true);
+        setCountdown(null);
+        setLastError(null);
 
         try {
             const { result } = await getVisualAudit(base64, 'image/jpeg', zoneType);
 
+            if (!isMountedRef.current) return;
+
             setScore(result.computation);
             setViolations(result.violations);
+            setRecommendations(result.recommendations);
             setScanCount(prev => prev + 1);
 
-            // Show violation overlays for 10 seconds then fade
-            setViolationOpacity(1);
-            if (violationFadeTimerRef.current) clearTimeout(violationFadeTimerRef.current);
-            violationFadeTimerRef.current = setTimeout(() => {
-                setViolationOpacity(0);
-            }, VIOLATION_VISIBLE_MS);
+            if (result.violations.length > 0) {
+                setShowViolationPanel(true);
+            }
         } catch (err) {
-            setLastGeminiError(err instanceof Error ? err.message : String(err));
+            if (!isMountedRef.current) return;
+            setLastError(
+                err instanceof Error ? 'Eroare la scanare. Se reîncearcă...' : 'Eroare necunoscută'
+            );
         } finally {
-            setIsGeminiScanning(false);
+            if (isMountedRef.current) {
+                setIsScanning(false);
+            }
         }
     }, [zoneType]);
 
@@ -318,15 +242,15 @@ const LiveMonitor: React.FC<LiveMonitorProps> = ({ zoneType, onChangeZone }) => 
 
         const scheduleNext = (delayMs: number) => {
             let remaining = Math.ceil(delayMs / 1000);
-            setGeminiCountdown(remaining);
+            setCountdown(remaining);
 
             countdownInterval = setInterval(() => {
                 remaining -= 1;
                 if (remaining <= 0) {
                     if (countdownInterval) clearInterval(countdownInterval);
-                    setGeminiCountdown(null);
+                    setCountdown(null);
                 } else {
-                    setGeminiCountdown(remaining);
+                    setCountdown(remaining);
                 }
             }, 1000);
 
@@ -350,65 +274,42 @@ const LiveMonitor: React.FC<LiveMonitorProps> = ({ zoneType, onChangeZone }) => 
     // ── Reset on zone change ───────────────────────────────────────────────
     useEffect(() => {
         setViolations([]);
+        setRecommendations([]);
         setScore(null);
         setScanCount(0);
-        setViolationOpacity(0);
-        setLastGeminiError(null);
+        setLastError(null);
+        setShowViolationPanel(false);
     }, [zoneType]);
 
-    // ── Cleanup violation fade timer on unmount ────────────────────────────
-    useEffect(() => {
-        return () => {
-            if (violationFadeTimerRef.current) clearTimeout(violationFadeTimerRef.current);
-        };
-    }, []);
-
     const vr = videoRect;
-    const hasVideoContent = vr.width > 0 && vr.height > 0;
+    const hasVideo = vr.width > 0 && vr.height > 0;
+    const violationCount = violations.length;
 
     return (
-        <div className="fixed inset-0 bg-black overflow-hidden">
-            {/* Video layer */}
-            <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                className="w-full h-full object-contain"
-            />
-            <canvas ref={canvasRef} className="hidden" />
+        <div className="fixed inset-0 bg-black flex flex-col">
+            {/* ═══ CAMERA FEED AREA ═══ */}
+            <div className="relative flex-1 min-h-0">
+                <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="w-full h-full object-contain"
+                />
+                <canvas ref={canvasRef} className="hidden" />
 
-            {/* Camera error state */}
-            {cameraError && (
-                <div className="absolute inset-0 flex items-center justify-center bg-black/90 z-50">
-                    <div className="text-center p-8">
-                        <p className="text-red-400 text-lg font-bold mb-2">Eroare cameră</p>
-                        <p className="text-white/50 text-sm">{cameraError}</p>
+                {/* Camera error */}
+                {cameraError && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/90 z-50">
+                        <div className="text-center p-8">
+                            <p className="text-red-400 text-lg font-bold mb-2">Eroare cameră</p>
+                            <p className="text-white/50 text-sm">{cameraError}</p>
+                        </div>
                     </div>
-                </div>
-            )}
+                )}
 
-            {hasVideoContent && (
-                <>
-                    {/* Scanning beam */}
-                    <div
-                        className="absolute pointer-events-none z-20 overflow-hidden"
-                        style={{ left: vr.x, top: vr.y, width: vr.width, height: vr.height }}
-                    >
-                        <div className="scan-beam" />
-                    </div>
-
-                    {/* Corner targeting marks */}
-                    <div className="absolute w-8 h-8 border-t-2 border-l-2 border-cyan-400/50 pointer-events-none z-20"
-                        style={{ left: vr.x + 8, top: vr.y + 8 }} />
-                    <div className="absolute w-8 h-8 border-t-2 border-r-2 border-cyan-400/50 pointer-events-none z-20"
-                        style={{ left: vr.x + vr.width - 40, top: vr.y + 8 }} />
-                    <div className="absolute w-8 h-8 border-b-2 border-l-2 border-cyan-400/50 pointer-events-none z-20"
-                        style={{ left: vr.x + 8, top: vr.y + vr.height - 40 }} />
-                    <div className="absolute w-8 h-8 border-b-2 border-r-2 border-cyan-400/50 pointer-events-none z-20"
-                        style={{ left: vr.x + vr.width - 40, top: vr.y + vr.height - 40 }} />
-
-                    {/* ── SVG overlay: TF.js real-time detections ── */}
+                {/* Violation bounding boxes on video — persistent until next scan */}
+                {hasVideo && violations.length > 0 && (
                     <svg
                         className="absolute pointer-events-none z-30"
                         style={{ left: vr.x, top: vr.y }}
@@ -416,50 +317,64 @@ const LiveMonitor: React.FC<LiveMonitorProps> = ({ zoneType, onChangeZone }) => 
                         height={vr.height}
                         viewBox={`0 0 ${vr.width} ${vr.height}`}
                     >
-                        {detections.map((det, i) => (
-                            <TFBox
-                                key={i}
-                                cls={det.class}
-                                score={det.score}
-                                bbox={det.bbox}
-                                videoNaturalW={naturalSize.w}
-                                videoNaturalH={naturalSize.h}
-                                vr={vr}
-                            />
-                        ))}
-
-                        {/* ── Gemini violation overlays (fade after 10s) ── */}
-                        {violations.map((v, i) => (
-                            <ViolationBox
-                                key={`v-${i}`}
-                                violation={v}
-                                vr={vr}
-                                opacity={violationOpacity}
-                            />
+                        {violations.map((v) => (
+                            <ViolationOverlay key={`${v.severity}-${v.description}`} violation={v} vr={vr} />
                         ))}
                     </svg>
+                )}
 
-                    {/* ── HUD layer ── */}
+                {/* ── TOP BAR: Score + Zone + Status ── */}
+                {hasVideo && (
                     <div
-                        className="absolute pointer-events-none z-50"
-                        style={{ left: vr.x, top: vr.y, width: vr.width, height: vr.height }}
+                        className="absolute top-0 left-0 right-0 z-40 pointer-events-none"
+                        style={{ paddingLeft: Math.max(vr.x, 8), paddingRight: Math.max(vr.x, 8) }}
                     >
-                        {/* Top-left: LIVE + zone toggles + FPS + model loading */}
-                        <div className="absolute top-3 left-3 flex flex-col gap-1.5 pointer-events-auto">
-                            <div className="flex items-center gap-2">
-                                {/* LIVE badge */}
-                                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-black/70 backdrop-blur-sm">
-                                    <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-                                    <span className="text-[10px] font-bold text-white uppercase tracking-widest">LIVE</span>
-                                </div>
+                        <div className="flex items-start justify-between pt-3 px-1">
+                            {/* Score badge */}
+                            <div className="pointer-events-auto">
+                                {score ? (
+                                    <div
+                                        className="flex items-center gap-2 px-4 py-2 rounded-xl backdrop-blur-md"
+                                        style={{
+                                            background: getScoreBg(score.finalScore),
+                                            border: `1px solid ${getScoreColor(score.finalScore)}40`,
+                                        }}
+                                    >
+                                        <span
+                                            className="text-3xl font-bold font-mono transition-all duration-700"
+                                            style={{ color: getScoreColor(score.finalScore) }}
+                                        >
+                                            {score.finalScore}
+                                        </span>
+                                        <div className="flex flex-col">
+                                            <span className="text-[10px] text-white/40">/100</span>
+                                            <span
+                                                className="text-xs font-semibold"
+                                                style={{ color: getScoreColor(score.finalScore) }}
+                                            >
+                                                {score.grade}
+                                            </span>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 backdrop-blur-md border border-white/10">
+                                        <span className="text-3xl font-bold font-mono text-white/20">--</span>
+                                        <span className="text-xs text-white/30">
+                                            {isScanning ? 'Scanare...' : 'Asteptare...'}
+                                        </span>
+                                    </div>
+                                )}
+                            </div>
 
-                                {/* Zone toggles */}
-                                <div className="flex rounded-md overflow-hidden bg-black/70 backdrop-blur-sm">
+                            {/* Zone toggle + status */}
+                            <div className="flex flex-col items-end gap-2 pointer-events-auto">
+                                {/* Zone toggle */}
+                                <div className="flex rounded-lg overflow-hidden bg-black/60 backdrop-blur-md border border-white/10">
                                     <button
                                         onClick={() => onChangeZone('casierie')}
-                                        className={`px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider transition-colors ${
+                                        className={`px-3 py-1.5 text-xs font-semibold transition-colors ${
                                             zoneType === 'casierie'
-                                                ? 'bg-cyan-500/30 text-cyan-300'
+                                                ? 'bg-cyan-500/25 text-cyan-300'
                                                 : 'text-white/40 hover:text-white/70'
                                         }`}
                                     >
@@ -467,116 +382,161 @@ const LiveMonitor: React.FC<LiveMonitorProps> = ({ zoneType, onChangeZone }) => 
                                     </button>
                                     <button
                                         onClick={() => onChangeZone('birou_consilier')}
-                                        className={`px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider transition-colors ${
+                                        className={`px-3 py-1.5 text-xs font-semibold transition-colors ${
                                             zoneType === 'birou_consilier'
-                                                ? 'bg-cyan-500/30 text-cyan-300'
+                                                ? 'bg-cyan-500/25 text-cyan-300'
                                                 : 'text-white/40 hover:text-white/70'
                                         }`}
                                     >
                                         Consilier
                                     </button>
                                 </div>
-                            </div>
 
-                            {/* FPS counter */}
-                            <div className="flex items-center gap-2">
-                                <div className="px-2 py-0.5 rounded bg-black/60 backdrop-blur-sm">
-                                    <span className="text-[10px] font-mono text-cyan-400">
-                                        {fps > 0 ? `${fps} FPS` : '-- FPS'}
-                                    </span>
-                                </div>
-
-                                {/* Model loading indicator */}
-                                {isModelLoading && (
-                                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-black/60 backdrop-blur-sm">
-                                        <div className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse" />
-                                        <span className="text-[10px] text-violet-300">TF.js loading…</span>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* Top-right: Compliance score badge */}
-                        {score && (
-                            <div className="absolute top-3 right-3 flex items-center gap-2 px-3 py-1.5 rounded-md bg-black/70 backdrop-blur-sm">
-                                <span className={`text-2xl font-bold font-mono ${
-                                    score.finalScore >= 95 ? 'text-green-400'
-                                    : score.finalScore >= 75 ? 'text-yellow-400'
-                                    : 'text-red-500'
-                                }`}>
-                                    {score.finalScore}
-                                </span>
-                                <div className="flex flex-col items-end">
-                                    <span className="text-[9px] text-white/40">/100</span>
-                                    <span className={`text-[10px] font-semibold ${
-                                        score.finalScore >= 95 ? 'text-green-400'
-                                        : score.finalScore >= 75 ? 'text-yellow-400'
-                                        : 'text-red-500'
-                                    }`}>
-                                        {score.grade}
-                                    </span>
+                                {/* Status pill */}
+                                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-black/60 backdrop-blur-md border border-white/10">
+                                    {isScanning ? (
+                                        <>
+                                            <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                                            <span className="text-[11px] text-amber-300 font-medium">Scanare...</span>
+                                        </>
+                                    ) : countdown !== null ? (
+                                        <>
+                                            <div className="w-2 h-2 rounded-full bg-white/30" />
+                                            <span className="text-[11px] text-white/50 font-mono">{countdown}s</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <div className="w-2 h-2 rounded-full bg-green-400" />
+                                            <span className="text-[11px] text-green-300">Live</span>
+                                        </>
+                                    )}
                                 </div>
                             </div>
-                        )}
-
-                        {/* Gemini error toast */}
-                        {lastGeminiError && (
-                            <div className="absolute top-14 left-3 right-3 pointer-events-auto">
-                                <div className="bg-red-900/80 backdrop-blur-sm rounded-lg px-3 py-2 text-[11px] text-red-300 break-all">
-                                    <span className="font-bold text-red-400">ERR: </span>
-                                    {lastGeminiError}
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Bottom-left: detection count + Gemini status */}
-                        <div className="absolute bottom-3 left-3 flex flex-col gap-1.5">
-                            {/* Object detection count */}
-                            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-black/70 backdrop-blur-sm">
-                                <div className={`w-1.5 h-1.5 rounded-full ${
-                                    isModelLoading ? 'bg-violet-400 animate-pulse' : 'bg-cyan-400'
-                                }`} />
-                                <span className="text-[11px] text-white/70">
-                                    {isModelLoading
-                                        ? 'Incarcare model…'
-                                        : `${detections.length} obiecte detectate`}
-                                </span>
-                            </div>
-
-                            {/* Gemini scan status */}
-                            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-black/70 backdrop-blur-sm">
-                                {isGeminiScanning ? (
-                                    <>
-                                        <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-                                        <span className="text-[11px] text-amber-300">Scanare conformitate…</span>
-                                    </>
-                                ) : geminiCountdown !== null ? (
-                                    <>
-                                        <div className="w-1.5 h-1.5 rounded-full bg-white/30" />
-                                        <span className="text-[11px] text-white/40 font-mono">
-                                            Scan in {geminiCountdown}s…
-                                        </span>
-                                    </>
-                                ) : (
-                                    <>
-                                        <div className="w-1.5 h-1.5 rounded-full bg-white/20" />
-                                        <span className="text-[11px] text-white/30">Asteptare cameră…</span>
-                                    </>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* Bottom-right: scan counter */}
-                        <div className="absolute bottom-3 right-3">
-                            <span className="text-[10px] font-mono text-white/30 bg-black/50 backdrop-blur-sm px-2 py-1 rounded">
-                                SCAN #{scanCount}
-                            </span>
                         </div>
                     </div>
-                </>
-            )}
+                )}
+
+                {/* ── SCAN NOW button (floating) ── */}
+                {hasVideo && !isScanning && (
+                    <button
+                        onClick={() => { captureRef.current().catch(() => {}); }}
+                        className="absolute z-40 bottom-4 left-1/2 -translate-x-1/2
+                                   flex items-center gap-2 px-5 py-2.5 rounded-full
+                                   bg-cyan-500/20 backdrop-blur-md border border-cyan-400/30
+                                   text-cyan-300 text-sm font-semibold
+                                   active:scale-95 transition-transform"
+                    >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                            <circle cx="12" cy="12" r="10" />
+                            <circle cx="12" cy="12" r="4" />
+                        </svg>
+                        Scanează Acum
+                    </button>
+                )}
+
+                {/* Scanning indicator overlay */}
+                {isScanning && hasVideo && (
+                    <div
+                        className="absolute z-30 pointer-events-none"
+                        style={{ left: vr.x, top: vr.y, width: vr.width, height: vr.height }}
+                    >
+                        <div className="absolute inset-0 border-2 border-cyan-400/30 rounded-lg animate-pulse" />
+                        <div className="scan-beam" />
+                    </div>
+                )}
+
+                {/* Error toast */}
+                {lastError && (
+                    <div className="absolute bottom-16 left-3 right-3 z-50">
+                        <div className="bg-red-900/80 backdrop-blur-md rounded-xl px-4 py-3 text-sm text-red-300 border border-red-500/30">
+                            <span className="font-bold text-red-400">Eroare: </span>
+                            {lastError.length > 100 ? lastError.substring(0, 100) + '...' : lastError}
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            {/* ═══ BOTTOM PANEL: Violations ═══ */}
+            <div className={`bg-[#0c1324] border-t border-white/10 transition-all duration-300 overflow-hidden ${
+                showViolationPanel && (violationCount > 0 || recommendations.length > 0) ? 'max-h-[40vh]' : 'max-h-14'
+            }`}>
+                {/* Panel header — always visible */}
+                <button
+                    onClick={() => setShowViolationPanel(prev => !prev)}
+                    className="w-full flex items-center justify-between px-4 py-3 text-left"
+                >
+                    <div className="flex items-center gap-3">
+                        {violationCount > 0 ? (
+                            <div className="flex items-center gap-2">
+                                <span className="flex items-center justify-center w-6 h-6 rounded-full bg-red-500/20 text-red-400 text-xs font-bold">
+                                    {violationCount}
+                                </span>
+                                <span className="text-sm text-white/80 font-medium">
+                                    {violationCount === 1 ? 'Problemă detectată' : 'Probleme detectate'}
+                                </span>
+                            </div>
+                        ) : scanCount > 0 ? (
+                            <div className="flex items-center gap-2">
+                                <span className="flex items-center justify-center w-6 h-6 rounded-full bg-green-500/20 text-green-400 text-xs">
+                                    ✓
+                                </span>
+                                <span className="text-sm text-green-400/80 font-medium">Totul în regulă</span>
+                            </div>
+                        ) : (
+                            <span className="text-sm text-white/40">Se inițializează...</span>
+                        )}
+                    </div>
+
+                    {(violationCount > 0 || recommendations.length > 0) && (
+                        <svg
+                            className={`w-4 h-4 text-white/40 transition-transform ${showViolationPanel ? 'rotate-180' : ''}`}
+                            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+                        >
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
+                        </svg>
+                    )}
+                </button>
+
+                {/* Violation list — scrollable */}
+                {showViolationPanel && (violationCount > 0 || recommendations.length > 0) && (
+                    <div className="overflow-y-auto px-3 pb-3 space-y-2" style={{ maxHeight: 'calc(40vh - 48px)' }}>
+                        {violations.map((v) => {
+                            const color = SEVERITY_COLORS[v.severity] ?? '#eab308';
+                            const bg = SEVERITY_BG[v.severity] ?? 'rgba(234, 179, 8, 0.15)';
+                            const icon = SEVERITY_ICONS[v.severity] ?? '🟡';
+                            return (
+                                <div
+                                    key={`${v.severity}-${v.description}`}
+                                    className="flex items-start gap-3 px-3 py-2.5 rounded-xl border"
+                                    style={{ background: bg, borderColor: `${color}30` }}
+                                >
+                                    <span className="text-base mt-0.5">{icon}</span>
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-sm text-white/90 leading-snug">{v.description}</p>
+                                        <span className="text-[11px] font-medium mt-0.5 inline-block" style={{ color }}>
+                                            {v.severity}
+                                        </span>
+                                    </div>
+                                </div>
+                            );
+                        })}
+
+                        {/* Recommendations */}
+                        {recommendations.length > 0 && (
+                            <div className="mt-2 px-3 py-2.5 rounded-xl bg-cyan-500/10 border border-cyan-400/20">
+                                <p className="text-[11px] text-cyan-400 font-semibold mb-1.5 uppercase tracking-wider">Recomandări</p>
+                                {recommendations.map((rec) => (
+                                    <p key={rec} className="text-sm text-white/70 leading-snug mb-1 last:mb-0">
+                                        • {rec}
+                                    </p>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
         </div>
     );
-};
+}
 
 export default LiveMonitor;

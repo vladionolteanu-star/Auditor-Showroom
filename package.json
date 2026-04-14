@@ -16,8 +16,6 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.69.0",
     "@google/generative-ai": "^0.24.1",
-    "@tensorflow-models/coco-ssd": "^2.2.3",
-    "@tensorflow/tfjs": "^4.22.0",
     "html2canvas": "^1.4.1",
     "jspdf": "^2.5.1",
     "react": "^19.2.0",

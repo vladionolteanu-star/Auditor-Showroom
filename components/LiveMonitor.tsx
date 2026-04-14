@@ -263,8 +263,10 @@ function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
 
     // ── Build detected objects summary for Gemini context ──────────────────
     const buildDetectedObjectsSummary = useCallback((): string => {
-        if (trackedObjects.length === 0) return '';
-        const items = trackedObjects.map(
+        // Only include actively visible objects — exclude ghosts persisted after disappearance
+        const activeObjects = trackedObjects.filter((obj) => obj.framesMissing === 0);
+        if (activeObjects.length === 0) return '';
+        const items = activeObjects.map(
             (obj) => `- ${obj.label} (${Math.round(obj.confidence * 100)}%) la coordonate [${obj.bbox.x.toFixed(2)}, ${obj.bbox.y.toFixed(2)}, ${obj.bbox.width.toFixed(2)}, ${obj.bbox.height.toFixed(2)}]`
         );
         return `\n\n## OBIECTE DETECTATE AUTOMAT (Computer Vision - EfficientDet):\n${items.join('\n')}\nFolosește aceste detecții ca referință pentru localizarea obiectelor.`;
@@ -324,6 +326,10 @@ function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
         let countdownInterval: ReturnType<typeof setInterval> | null = null;
 
         const scheduleNext = (delayMs: number) => {
+            // Clear any previous timer to prevent stale handle leaks
+            if (geminiTimerRef.current) clearTimeout(geminiTimerRef.current);
+            if (countdownInterval) clearInterval(countdownInterval);
+
             let remaining = Math.ceil(delayMs / 1000);
             setCountdown(remaining);
 
@@ -407,8 +413,8 @@ function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
                         ))}
 
                         {/* Gemini compliance violations (dashed, persistent) */}
-                        {violations.map((v) => (
-                            <ViolationOverlay key={`${v.severity}-${v.description}`} violation={v} vr={vr} />
+                        {violations.map((v, i) => (
+                            <ViolationOverlay key={`v-${i}`} violation={v} vr={vr} />
                         ))}
                     </svg>
                 )}
@@ -611,13 +617,13 @@ function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
 
                 {showViolationPanel && (violationCount > 0 || recommendations.length > 0) && (
                     <div className="overflow-y-auto px-3 pb-3 space-y-2" style={{ maxHeight: 'calc(40vh - 48px)' }}>
-                        {violations.map((v) => {
+                        {violations.map((v, i) => {
                             const color = SEVERITY_COLORS[v.severity] ?? '#eab308';
                             const bg = SEVERITY_BG[v.severity] ?? 'rgba(234, 179, 8, 0.15)';
                             const icon = SEVERITY_ICONS[v.severity] ?? '🟡';
                             return (
                                 <div
-                                    key={`${v.severity}-${v.description}`}
+                                    key={`v-${i}`}
                                     className="flex items-start gap-3 px-3 py-2.5 rounded-xl border"
                                     style={{ background: bg, borderColor: `${color}30` }}
                                 >

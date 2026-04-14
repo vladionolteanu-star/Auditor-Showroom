@@ -37,7 +37,7 @@ export const getVisualAudit = async (
 ): Promise<{ thoughtProcess: string; result: ComplianceReport }> => {
 
     const model = genAI.getGenerativeModel({
-        model: "gemini-pro-latest",
+        model: "gemini-2.0-flash",
         generationConfig: {
             temperature: 0.1,
             topK: 1,

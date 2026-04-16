@@ -1,37 +1,37 @@
 """FastAPI application — entry point for the backend server."""
 
+from pathlib import Path
+
 from dotenv import load_dotenv
 
-load_dotenv()  # reads backend/.env (or project root .env)
+# Load backend/.env explicitly (don't rely on cwd) and override any stale shell env
+_ENV_FILE = Path(__file__).resolve().parent / ".env"
+load_dotenv(dotenv_path=_ENV_FILE, override=True)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.api.v1.scan import router as scan_router
 from backend.api.v1.detect import router as detect_router
+from backend.api.v1.ws_detect import router as ws_detect_router
 
 app = FastAPI(
     title="Visual Showroom Auditor API",
     version="1.0.0",
 )
 
-# CORS — allow the Vite dev server and production origins
+# CORS — permissive for dev (internal tool, not public-facing)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",   # Vite dev
-        "http://localhost:4173",   # Vite preview
-        "http://127.0.0.1:5173",
-        "http://localhost:3000",   # User port
-        "http://192.168.80.155:3000", # Network IP
-    ],
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
 app.include_router(scan_router)
 app.include_router(detect_router)
+app.include_router(ws_detect_router)
 
 
 @app.get("/health")

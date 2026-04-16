@@ -50,6 +50,11 @@ async def scan(req: ScanRequest) -> ScanResponse:
             recommendations=report.recommendations,
         )
     except ValueError as exc:
+        logger.warning("Scan validation error: %s", exc)
         raise HTTPException(status_code=422, detail=str(exc))
     except RuntimeError as exc:
+        logger.error("Scan runtime error: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+    except Exception as exc:
+        logger.exception("Scan unexpected error")
         raise HTTPException(status_code=500, detail=str(exc))

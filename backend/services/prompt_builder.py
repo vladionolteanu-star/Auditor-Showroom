@@ -234,28 +234,28 @@ Caută SPECIFIC obiecte mici:
 ## FORMAT DE RĂSPUNS (JSON STRICT)
 
 ```json
-{{{{
+{{
   "_reasoning": "PAS 1: Zonă de tip {zone_name}, suprafața ~X% liberă, impresie: [ordonat/ușor dezordonat/dezordonat]... PAS 2: STÂNGA-SUS: [obiecte]... PAS 3: Obiecte mici detectate: [lista]... CONCLUZIE: disorder_score: N",
-  "inventory": {{{{
+  "inventory": {{
       "disorder_score": 0,
       "has_personal_items": false,
       "has_document_clutter": false,
       "has_clear_workspace": true
-  }}}},
+  }},
   "raw_deviations": [
-      {{{{
+      {{
           "description": "Telefon mobil personal pe tejghea, sector CENTRU-JOS",
           "severity": "Mare",
-          "boundingBox": {{{{"x": 0.42, "y": 0.71, "width": 0.08, "height": 0.05}}}}
-      }}}},
-      {{{{
+          "boundingBox": {{"x": 0.42, "y": 0.71, "width": 0.08, "height": 0.05}}
+      }},
+      {{
           "description": "Pix liber pe tejghea, sector STÂNGA-JOS",
           "severity": "Mică",
-          "boundingBox": {{{{"x": 0.12, "y": 0.68, "width": 0.07, "height": 0.015}}}}
-      }}}}
+          "boundingBox": {{"x": 0.12, "y": 0.68, "width": 0.07, "height": 0.015}}
+      }}
   ],
   "recommendations": ["Îndepărtați telefonul personal de pe tejghea", "Puneți pixul în suport"]
-}}}}
+}}
 ```
 
 ⚠️ Coordonatele boundingBox sunt NORMALIZATE (0-1).

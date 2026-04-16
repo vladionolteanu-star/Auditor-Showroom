@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import type { ZoneType, WorkspaceViolation, CalculatedScore, ComplianceReport } from '../types';
-import { useYoloDetection, type TrackedObject } from '../hooks/useYoloDetection';
+import { useYoloDetectionWs, type TrackedObject } from '../hooks/useYoloDetectionWs';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
 
@@ -191,11 +191,9 @@ function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
     const [showViolationPanel, setShowViolationPanel] = useState(false);
 
     // ── YOLO real-time detection ──────────────────────────────────────────
-    const { trackedObjects, isModelLoading, fps, modelError } = useYoloDetection(videoRef, {
+    const { trackedObjects, isModelLoading, fps, modelError } = useYoloDetectionWs(videoRef, {
         enabled: isStreaming,
         minConfidence: 0.40,
-        targetFps: 15,
-        modelPath: '/yolo11n.onnx'
     });
 
     // ── Camera startup ─────────────────────────────────────────────────────
@@ -204,6 +202,13 @@ function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
 
         const startCamera = async () => {
             try {
+                if (!navigator.mediaDevices?.getUserMedia) {
+                    throw new Error(
+                        window.isSecureContext
+                            ? 'Camera nu este disponibilă pe acest dispozitiv'
+                            : 'Camera necesită HTTPS. Accesează prin https:// sau localhost'
+                    );
+                }
                 const stream = await navigator.mediaDevices.getUserMedia({
                     video: {
                         facingMode: 'environment',
@@ -319,9 +324,11 @@ function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
             if (result.violations.length > 0) {
                 setShowViolationPanel(true);
             }
-        } catch {
+        } catch (err: unknown) {
             if (!isMountedRef.current) return;
-            setLastError('Eroare la scanare. Se reîncearcă...');
+            const msg = err instanceof Error ? err.message : String(err);
+            setLastError(`Eroare la scanare: ${msg}`);
+            console.error('Scan failed:', err);
         } finally {
             if (isMountedRef.current) {
                 setIsScanning(false);
@@ -533,10 +540,10 @@ function LiveMonitor({ zoneType, onChangeZone }: LiveMonitorProps) {
 
                 {/* Error toasts */}
                 {(lastError || modelError) && (
-                    <div className="absolute bottom-16 left-3 right-3 z-50">
-                        <div className="bg-red-900/80 backdrop-blur-md rounded-xl px-4 py-3 text-sm text-red-300 border border-red-500/30">
-                            <span className="font-bold text-red-400">Eroare: </span>
-                            {(lastError ?? modelError ?? '').substring(0, 100)}
+                    <div className="absolute bottom-16 left-3 right-3 z-50 max-h-[40vh] overflow-auto">
+                        <div className="bg-red-900/90 backdrop-blur-md rounded-xl px-4 py-3 text-xs text-red-200 border border-red-500/40 whitespace-pre-wrap break-words font-mono">
+                            <div className="font-bold text-red-400 mb-1 text-sm">Eroare scan:</div>
+                            {lastError ?? modelError ?? ''}
                         </div>
                     </div>
                 )}
